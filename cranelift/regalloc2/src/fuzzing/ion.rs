@@ -81,7 +81,7 @@ pub fn check(t: TestCase) {
             ) {
                 Ok(()) => {}
                 Err(RegAllocError::OutOfFuel) if fuel.is_some() => return,
-                Err(e) => panic!("regalloc did not succeed: {e:?}"),
+                Err(e) => panic!("regalloc did not succeed: {:?}", e),
             }
             let mut checker = checker::Checker::new(func, &env);
             checker.prepare(&ctx.borrow().output);
@@ -175,7 +175,7 @@ mod budget {
             match run(f, ctx, Some(mid)) {
                 Ok(()) => hi = mid,
                 Err(RegAllocError::OutOfFuel) => lo = mid,
-                Err(e) => panic!("{e:?}"),
+                Err(e) => panic!("{:?}", e),
             }
         }
         hi
@@ -185,10 +185,10 @@ mod budget {
     /// least fuel that succeeds).
     const GOLDEN: &[(usize, usize, u64, u64, u64)] = &[
         // Fuel binds: the least budget is one more than an unbounded run used.
-        (64, 1, 29234, 386, 29235),
-        (512, 1, 955332, 13836, 955333),
+        (64, 1, 36242, 898, 36243),
+        (512, 1, 1355460, 17932, 1355461),
         // The liveness-word cap binds: the least budget is 16 x the peak.
-        (256, 64, 705845, 197636, 3162176),
+        (256, 64, 807605, 199684, 3194944),
     ];
 
     /// The same function always uses the same fuel, in a fresh or a reused
@@ -202,7 +202,7 @@ mod budget {
             let mut fresh = Ctx::default();
             let r = run(&f, &mut fresh, None);
             let first = outcome(&fresh, r);
-            assert!(first.starts_with("ok "), "{first}");
+            assert!(first.starts_with("ok "), "{}", first);
             check(&f, &fresh);
             for _ in 0..2 {
                 let r = run(&f, &mut reused, None);
@@ -238,7 +238,7 @@ mod budget {
             for fuel in [least - 1, least / 2, least / 16] {
                 let mut fresh = Ctx::default();
                 let r = run(&f, &mut fresh, Some(fuel));
-                assert!(matches!(r, Err(RegAllocError::OutOfFuel)), "{r:?}");
+                assert!(matches!(r, Err(RegAllocError::OutOfFuel)), "{:?}", r);
                 let stopped = outcome(&fresh, r);
 
                 let mut reused = Ctx::default();
@@ -248,7 +248,7 @@ mod budget {
                         run(w, &mut reused, None).unwrap();
                     }
                     let r = run(&f, &mut reused, Some(fuel));
-                    assert_eq!(outcome(&reused, r), stopped, "fuel {fuel}");
+                    assert_eq!(outcome(&reused, r), stopped, "fuel {}", fuel);
                 }
                 // The context the abort left allocates another function as a
                 // fresh one does.
@@ -263,7 +263,8 @@ mod budget {
     }
 
     /// The liveness-word cap (fuel / 16 words over all livein and liveout
-    /// sets) stops a function whose liveness sets would grow past it even
+    /// sets, plus `RANGE_WORDS` per live range) stops a function whose
+    /// liveness sets would grow past it even
     /// when the fuel itself would last. Stride 64 gives every long-lived
     /// value a word of its own, so the sets are large for the fuel spent.
     #[test]
@@ -275,10 +276,12 @@ mod budget {
         let fuel = peak * 16 - 1;
         assert!(
             fuel > used,
-            "the cap should bind first: used {used}, peak {peak}"
+            "the cap should bind first: used {}, peak {}",
+            used,
+            peak
         );
         let r = run(&f, &mut ctx, Some(fuel));
-        assert!(matches!(r, Err(RegAllocError::OutOfFuel)), "{r:?}");
+        assert!(matches!(r, Err(RegAllocError::OutOfFuel)), "{:?}", r);
         assert!(run(&f, &mut ctx, Some(peak * 16)).is_ok());
         check(&f, &ctx);
     }

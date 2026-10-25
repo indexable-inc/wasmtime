@@ -136,11 +136,19 @@ impl<'a, F: Function> Env<'a, F> {
     }
 }
 
-/// The liveness sets may hold one 64-bit word (about 24 bytes in their hash
-/// map form) per this many units of fuel. With Cranelift's budget of 256
-/// fuel per unit of function size that is 16 words, about 400 bytes, per
-/// unit; real functions peak far below it (see Cranelift `compile.rs`).
+/// The liveness sets and the live ranges built from them may hold one
+/// 64-bit set word (about 24 bytes in the sets' hash map form) per this many
+/// units of fuel; a live range counts as [`RANGE_WORDS`] words. With
+/// Cranelift's budget of 256 fuel per unit of function size that is 16
+/// words per unit. See Cranelift `machinst/compile.rs` for what real
+/// functions use and for the measured memory per unit.
 const FUEL_PER_LIVE_WORD: u64 = 16;
+
+/// What one live range counts for against the liveness-word cap: the
+/// `LiveRange` itself (56 bytes) plus its entry in the vreg's range list
+/// (12 bytes, more while that list grows in the bump arena), about four
+/// 24-byte set words.
+pub(crate) const RANGE_WORDS: usize = 4;
 
 pub fn run<F: Function>(
     func: &F,
