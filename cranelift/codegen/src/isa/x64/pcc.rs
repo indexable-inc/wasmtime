@@ -542,8 +542,12 @@ fn check_external(
         I::movq_rm(i) => check_mov(ctx, vcode, wg(&i.r64), src_of(&i.rm64), &mem, 64, 64),
         I::movl_rm(i) => {
             let src = src_of(&i.rm32);
+            // Only vregs: they are SSA here, so the relation stays true.
             if let Src::Reg(src) = src {
-                state.zext32.insert(src, wg(&i.r32).to_reg());
+                let dst = wg(&i.r32).to_reg();
+                if src.is_virtual() && dst.is_virtual() {
+                    state.zext32.insert(src, dst);
+                }
             }
             check_mov(ctx, vcode, wg(&i.r32), src, &mem, 32, 32)
         }
