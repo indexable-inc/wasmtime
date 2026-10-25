@@ -1150,8 +1150,13 @@ impl<'a> EgraphPass<'a> {
             // that member. Members are equal values, so the class's facts hold
             // for each; and every fact is still checked where its value is
             // defined in VCode, so this can only cost completeness, never
-            // soundness. Only members with no fact of their own are filled, and
-            // a class whose facts conflict is left alone.
+            // soundness. Members with no fact of their own are filled; a member
+            // with only a numeric range gets the class's `Def` symbol (the
+            // member may be a GVN hit on an older value whose range fact was
+            // set for an access without a bounds check, while the class's
+            // symbol names this access's checked index; the checker re-derives
+            // the range as the symbol's shadow). A class whose facts conflict
+            // is left alone.
             let mut class: alloc::vec::Vec<u32> = (0..dfg.num_values() as u32).collect();
             for v in dfg.values() {
                 if let ValueDef::Union(x, y) = dfg.value_def(v) {
@@ -1176,11 +1181,16 @@ impl<'a> EgraphPass<'a> {
             if !class_fact.is_empty() {
                 let values: Vec<Value> = dfg.values().collect();
                 for v in values {
-                    if dfg.facts[v].is_some() {
-                        continue;
-                    }
                     let root = find(&mut class, v.as_u32());
-                    if let Some(Some(fact)) = class_fact.get(&root) {
+                    let Some(Some(fact)) = class_fact.get(&root) else {
+                        continue;
+                    };
+                    let fill = match (&dfg.facts[v], fact) {
+                        (None, _) => true,
+                        (Some(Fact::Range { .. }), Fact::Def { .. }) => true,
+                        _ => false,
+                    };
+                    if fill {
                         dfg.facts[v] = Some(fact.clone());
                     }
                 }

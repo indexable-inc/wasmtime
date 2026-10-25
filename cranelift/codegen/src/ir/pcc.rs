@@ -1547,6 +1547,18 @@ impl<'a> FactContext<'a> {
                 }
                 _ => bail!(OutOfBounds),
             },
+            // The null pointer itself: the egraph can prove a Spectre guard
+            // always selects its null arm (a constant index that is always
+            // out of bounds), leaving a load from address 0. The same
+            // assumption that admits `nullable` pointers above admits it: a
+            // small access at address 0 traps, because the first pages of
+            // the address space are never mapped (Linux `mmap_min_addr`,
+            // 64 KiB by default; Wasmtime's load-from-zero trap relies on it).
+            Fact::Range {
+                bit_width,
+                min: 0,
+                max: 0,
+            } if *bit_width == self.pointer_width && size <= 4096 => Ok(None),
             _ => bail!(OutOfBounds),
         }
     }
