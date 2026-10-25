@@ -746,7 +746,111 @@ fn inline_pcc(
             },
         })
     };
-    let mut pending: Vec<ir::MemoryType> = callee.memory_types.keys().collect();
+    // A callee memory type's data with its facts' types mapped by `mt_map`.
+    let convert = |mt: ir::MemoryType,
+                   mt_map: &SecondaryMap<ir::MemoryType, PackedOption<ir::MemoryType>>|
+     -> MemoryTypeData {
+        match &callee.memory_types[mt] {
+            MemoryTypeData::Struct { size, fields } => MemoryTypeData::Struct {
+                size: *size,
+                fields: fields
+                    .iter()
+                    .map(|field| MemoryTypeField {
+                        offset: field.offset,
+                        ty: field.ty,
+                        // A fact that cannot be mapped is dropped: a load of
+                        // the field then proves nothing about its value.
+                        fact: field.fact.as_ref().and_then(|f| map_fact(f, mt_map)),
+                        readonly: field.readonly,
+                    })
+                    .collect(),
+            },
+            MemoryTypeData::Memory { size } => MemoryTypeData::Memory { size: *size },
+            MemoryTypeData::DynamicMemory { size, gv } => MemoryTypeData::DynamicMemory {
+                size: *size,
+                gv: gv_of(*gv),
+            },
+            MemoryTypeData::Empty => MemoryTypeData::Empty,
+        }
+    };
+
+    // Seed the map from the caller's own correspondence. Two heaps of the
+    // same size (multi-memory) have equal data, so mapping by equality alone
+    // sends the callee's second heap to the caller's first. The inlined base
+    // load then claims the first heap while the caller's `vmctx` field proves
+    // the second, and the checker rejects it. So first pair each callee
+    // struct (its `vmctx`) with a caller struct field by field, and each
+    // field's memory type with the caller field's. The seeding is kept only
+    // if every pair it makes is structurally equal under it, the same test
+    // as below. Any such mapping is sound (every inlined fact is checked
+    // again); this one only avoids false rejections.
+    let caller_structs: Vec<ir::MemoryType> = func
+        .memory_types
+        .iter()
+        .filter(|(_, d)| matches!(d, MemoryTypeData::Struct { .. }))
+        .map(|(m, _)| m)
+        .collect();
+    let mem_ty = |f: &Option<Fact>| match f {
+        Some(Fact::Mem { ty, .. } | Fact::DynamicMem { ty, .. }) => Some(*ty),
+        _ => None,
+    };
+    for cs in callee.memory_types.keys() {
+        if mt_map[cs].is_some() || !matches!(callee.memory_types[cs], MemoryTypeData::Struct { .. }) {
+            continue;
+        }
+        for &ks in &caller_structs {
+            let mut trial = mt_map.clone();
+            let mut pairs = Vec::new();
+            let mut work = alloc::vec![(cs, ks)];
+            let mut ok = true;
+            while let Some((c, k)) = work.pop() {
+                if let Some(m) = trial[c].expand() {
+                    if m != k {
+                        ok = false;
+                        break;
+                    }
+                    continue;
+                }
+                trial[c] = k.into();
+                pairs.push((c, k));
+                match (&callee.memory_types[c], &func.memory_types[k]) {
+                    (
+                        MemoryTypeData::Struct { fields: cf, .. },
+                        MemoryTypeData::Struct { fields: kf, .. },
+                    ) => {
+                        if cf.len() != kf.len() {
+                            ok = false;
+                            break;
+                        }
+                        for (a, b) in cf.iter().zip(kf) {
+                            if let (Some(ta), Some(tb)) = (mem_ty(&a.fact), mem_ty(&b.fact)) {
+                                work.push((ta, tb));
+                            }
+                        }
+                    }
+                    (MemoryTypeData::Struct { .. }, _) | (_, MemoryTypeData::Struct { .. }) => {
+                        ok = false;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if ok
+                && pairs
+                    .iter()
+                    .all(|&(c, k)| convert(c, &trial) == func.memory_types[k])
+            {
+                mt_map = trial;
+                break;
+            }
+        }
+    }
+
+    let mut pending: Vec<ir::MemoryType> = callee
+        .memory_types
+        .keys()
+        .filter(|&mt| mt_map[mt].is_none())
+        .collect();
     while !pending.is_empty() {
         let ready: Vec<ir::MemoryType> = pending
             .iter()
@@ -765,28 +869,7 @@ fn inline_pcc(
         };
         pending.retain(|mt| !batch.contains(mt));
         for mt in batch {
-            let data = match &callee.memory_types[mt] {
-                MemoryTypeData::Struct { size, fields } => MemoryTypeData::Struct {
-                    size: *size,
-                    fields: fields
-                        .iter()
-                        .map(|field| MemoryTypeField {
-                            offset: field.offset,
-                            ty: field.ty,
-                            // A fact that cannot be mapped is dropped: a load of
-                            // the field then proves nothing about its value.
-                            fact: field.fact.as_ref().and_then(|f| map_fact(f, &mt_map)),
-                            readonly: field.readonly,
-                        })
-                        .collect(),
-                },
-                MemoryTypeData::Memory { size } => MemoryTypeData::Memory { size: *size },
-                MemoryTypeData::DynamicMemory { size, gv } => MemoryTypeData::DynamicMemory {
-                    size: *size,
-                    gv: gv_of(*gv),
-                },
-                MemoryTypeData::Empty => MemoryTypeData::Empty,
-            };
+            let data = convert(mt, &mt_map);
             let existing = func
                 .memory_types
                 .iter()

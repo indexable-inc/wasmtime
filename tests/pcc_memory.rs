@@ -104,4 +104,27 @@ mod pcc_memory_tests {
             }
         }
     }
+
+    /// Inlining a callee that uses the second of two same-size memories: the
+    /// inliner must map the callee's heap types to the caller's by position
+    /// in `vmctx`, not to the first caller type with equal data (fuzz find,
+    /// 2026-10-25).
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn inline_multi_memory() {
+        let _ = env_logger::try_init();
+        let wat = r#"(module (memory 1) (memory 1)
+  (func $g (param i32) (result i32) (i32.load 1 (local.get 0)))
+  (func (export "f") (param i32) (result i32)
+    (i32.add (i32.load 1 (local.get 0)) (call $g (local.get 0)))))"#;
+        for may_move in [true, false] {
+            let mut cfg = Config::new();
+            cfg.cranelift_pcc(true);
+            cfg.wasm_multi_memory(true);
+            cfg.compiler_inlining(Inlining::Yes);
+            cfg.memory_may_move(may_move);
+            let engine = Engine::new(&cfg).unwrap();
+            Module::new(&engine, wat).expect("compilation with PCC should succeed");
+        }
+    }
 }
