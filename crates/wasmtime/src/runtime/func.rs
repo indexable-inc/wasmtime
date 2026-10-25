@@ -1504,6 +1504,9 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
             && limit != usize::MAX
             && crate::runtime::vm::get_stack_pointer() < limit.saturating_add(IX_REENTRY_SLACK)
         {
+            // Like the interrupt refusal below, poison a component store.
+            #[cfg(feature = "component-model")]
+            store.0.set_trapped();
             return Err(crate::Trap::StackOverflow.into());
         }
     }

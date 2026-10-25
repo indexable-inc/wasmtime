@@ -81,8 +81,12 @@
 //! (4096 x D): a lower return limit adds a poll to every call of a function
 //! with a long tail, and on Turso 256 cost more than the skipped entry polls
 //! saved (`bench/results/2026-10-25-poll-cheap` in wasm-host). The machinery
-//! stays so the per-frame constant can be lowered. An exception lands in a catch block
-//! that polls (`FuncEnvironment::on_catch_block_entry`), so a throw adds at
+//! stays so the per-frame constant can be lowered. Worst case: a recursion
+//! interrupted at the bottom whose frames each run about 4096 cheap
+//! operators after the recursive call; with the default 512 KiB wasm stack
+//! and small frames (D about 16k) that is about 67M operators, tens of
+//! milliseconds, with no poll (about 4M at a limit of 256), and it grows
+//! with `max_wasm_stack`. An exception lands in a catch block that polls (`FuncEnvironment::on_catch_block_entry`), so a throw adds at
 //! most the thrower's local cost. Host code is not counted; entering wasm
 //! from the host polls in the runtime (`invoke_wasm_and_catch_traps`), so
 //! skipping entry polls never lets an interrupted store run wasm.
@@ -91,7 +95,7 @@
 //! (`ESCAPING_LIMIT` if reachable from outside), whatever it calls.
 //!
 //! The pass reads unvalidated bodies. Anything the structured walk does not
-//! understand (legacy exceptions, stack switching, an operator with custom
+//! understand (stack switching, an operator with custom
 //! arity it does not know, a bad label or function index) makes it give up
 //! on the whole module, which then gets the structure-free [`fallback`]
 //! placement: nothing skipped, a poll after every operator that is not
@@ -101,9 +105,9 @@
 //! the old placement), and function validation rejects such a module
 //! before any of its code runs.
 
+use crate::graphs::{Graph, StronglyConnectedComponents};
 use crate::prelude::*;
 use crate::{DefinedFuncIndex, FuncIndex, FunctionBodyData, Module, PrimaryMap};
-use crate::graphs::{Graph, StronglyConnectedComponents};
 use cranelift_entity::{EntityRef, SecondaryMap};
 use wasmparser::{FunctionBody, Operator};
 
@@ -223,12 +227,12 @@ impl IxPollPlan {
         for (_, members) in sccs.iter() {
             let cyclic = members.len() > 1 || graph.edges[members[0]].contains(&members[0]);
             for &f in members {
-                let limit = if module.functions[module.func_index(f)].is_escaping() || tail_called[f]
-                {
-                    IX_POLL_ESCAPING_LIMIT
-                } else {
-                    IX_POLL_INTERNAL_LIMIT
-                };
+                let limit =
+                    if module.functions[module.func_index(f)].is_escaping() || tail_called[f] {
+                        IX_POLL_ESCAPING_LIMIT
+                    } else {
+                        IX_POLL_INTERNAL_LIMIT
+                    };
                 let body = &bodies[f].body;
                 let mut plan = None;
                 if !cyclic {
@@ -268,8 +272,10 @@ impl IxPollPlan {
     }
 }
 
-/// Whether `op` is straight-line: no branch, call, return, throw, block
-/// boundary or stack switch.
+/// Whether `op` is straight-line: no branch, call, return, block boundary or
+/// stack switch. `unreachable` and `throw_ref` count as straight-line: they
+/// leave the run (a trap, or a catch block that polls) rather than continue
+/// it elsewhere.
 fn is_straight_line(op: &Operator<'_>) -> bool {
     matches!(
         op,
@@ -280,15 +286,17 @@ fn is_straight_line(op: &Operator<'_>) -> bool {
     ) || op_is_plain(op)
 }
 
-/// The placement for a module the structured walk gives up on (legacy
-/// exceptions, stack switching, an operator it does not know). It needs no
+/// The placement for a module the structured walk gives up on (stack
+/// switching, an operator it does not know; legacy exceptions too, though
+/// Cranelift cannot compile them). It needs no
 /// structure: the entry polls, and so does the operator after every
 /// operator that is not straight-line, so every control transfer lands on
-/// a poll (a branch target follows an `end`, `else`, `catch` or `loop`; a
+/// a poll (a branch target follows an `end` or is a `loop` header; a
 /// call, `resume` or `suspend` continues after it; a callee starts at its
 /// entry poll). What runs between two polls is one straight-line run,
-/// capped at `SEGMENT_LIMIT` operators, and a frame leaves after at most
-/// `RETURN_LIMIT` since its last poll, as in the structured placement.
+/// capped at `SEGMENT_LIMIT` operators; every call is followed by a poll,
+/// so returns do not chain. (The `RETURN_LIMIT` clause below only matters
+/// if that limit is lowered below `SEGMENT_LIMIT`.)
 /// Nothing is skipped, and it polls far more often; only modules using
 /// those features pay for it.
 fn fallback(body: &FunctionBody<'_>) -> Option<IxFuncPoll> {

@@ -859,7 +859,10 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         debug_assert!(self.poll_ptr_var.is_reserved_value());
         // x86_64 reloads the pointer at every poll (see `poll_check`);
         // elsewhere it is loaded once here and kept in a variable.
-        if self.isa.triple().architecture != target_lexicon::Architecture::X86_64 {
+        if !matches!(
+            self.isa.triple().architecture,
+            target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::X86_64h
+        ) {
             self.poll_ptr_var = builder.declare_var(self.pointer_type());
             let vmctx = self.vmctx_val(&mut builder.cursor());
             let poll_ptr = self

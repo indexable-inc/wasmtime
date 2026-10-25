@@ -90,7 +90,10 @@ fn after_trip(body: &str, arg: i32) -> Result<u64> {
 
 fn assert_within(name: &str, done: u64, frames: u64) {
     let bound = SEGMENT + RETURN * (frames - 1);
-    println!("{name}: {done} units after trip ({} ops), bound {bound} ops", done * 4);
+    println!(
+        "{name}: {done} units after trip ({} ops), bound {bound} ops",
+        done * 4
+    );
     assert!(
         done * 4 <= bound,
         "{name}: {done} units = {} ops > bound {bound}",
@@ -336,6 +339,42 @@ fn stack_switching_gets_the_fallback_placement() -> Result<()> {
         2000,
     )?;
     assert_within("fallback recursion tails", done, 2002);
+    assert!(done * 4 <= SEGMENT, "{done}");
+    Ok(())
+}
+
+#[test]
+fn trips_inside_a_resumed_continuation() -> Result<()> {
+    // A generator yields to its handler in a loop; long straight-line work
+    // follows the `suspend` (inside the continuation) and the handler
+    // landing (in the parent). The trip happens in the continuation, so
+    // only the polls after `suspend` / after the landing can stop it.
+    let mut c = config();
+    c.wasm_stack_switching(true);
+    let w = work(1500);
+    let body = format!(
+        r#"(type $ft (func)) (type $ct (cont $ft)) (tag $yield)
+           (elem declare func $gen)
+           (func $gen
+             (loop $l {w} (call $maybe) (suspend $yield) {w} (br $l)))
+           (func (export "run") (param i32) (local $k (ref null $ct))
+             (local.set $k (cont.new $ct (ref.func $gen)))
+             (loop $l
+               (block $h (result (ref $ct))
+                 (resume $ct (on $yield $h) (local.get $k))
+                 (unreachable))
+               (local.set $k)
+               {w}
+               (br $l)))"#
+    );
+    let done = match after_trip_with(&c, &body, 0) {
+        Err(e) if format!("{e:?}").contains("not supported") => {
+            println!("stack switching unsupported here, skipped: {e}");
+            return Ok(());
+        }
+        r => r?,
+    };
+    assert_within("continuation", done, 2);
     assert!(done * 4 <= SEGMENT, "{done}");
     Ok(())
 }
