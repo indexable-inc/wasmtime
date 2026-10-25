@@ -23,11 +23,13 @@ use std::path::{Path, PathBuf};
 /// hashed recursively: Cranelift's code generator (with its ISLE rules and
 /// the meta crates that generate instruction definitions), the x64
 /// assembler, Winch's code generator, the vendored register allocator, the
-/// Wasm-to-CLIF translator, and this crate.
+/// Wasm-to-CLIF translator and the SSA builder it uses (cranelift-frontend),
+/// and this crate.
 const IX_SOURCE_TREES: &[&str] = &[
     "../../cranelift/assembler-x64",
     "../../cranelift/codegen/meta/src",
     "../../cranelift/codegen/src",
+    "../../cranelift/frontend/src",
     "../../cranelift/regalloc2/src",
     "../../winch/codegen/src",
     "../cranelift/src",
