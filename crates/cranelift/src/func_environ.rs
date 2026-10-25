@@ -231,8 +231,8 @@ pub struct FuncEnvironment<'module_environment> {
     /// spill, and this isn't any worse than reloading each time.
     epoch_ptr_var: cranelift_frontend::Variable,
 
-    /// A cached pointer to the per-Store poll page, when performing
-    /// poll-page interruption (ix fork). Loaded from the vmctx in the
+    /// A cached pointer to the per-Store poll word, when performing
+    /// poll interruption (ix fork). Loaded from the vmctx in the
     /// function prologue and kept in a register like `epoch_ptr_var`.
     poll_ptr_var: cranelift_frontend::Variable,
 
@@ -834,7 +834,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         self.epoch_check_full(builder, cur_epoch_value, continuation_block);
     }
 
-    /// Poll-page interruption (ix fork): cache the store's poll-page pointer
+    /// Poll interruption (ix fork): cache the store's poll-word pointer
     /// and poll once, at the same place `epoch_function_entry` checks.
     fn poll_function_entry(&mut self, builder: &mut FunctionBuilder<'_>) {
         debug_assert!(self.poll_ptr_var.is_reserved_value());

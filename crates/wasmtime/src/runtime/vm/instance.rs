@@ -574,7 +574,7 @@ impl Instance {
                     Some(NonNull::from(store.engine().epoch_counter()).into());
             }
             // Rewritten on every instantiation, so a pooling slot reused by
-            // another store polls that store's page, never the old one.
+            // another store polls that store's word, never the old one.
             *self.as_mut().poll_ptr() = store.poll_ptr().map(Into::into);
 
             if self.env_module().needs_gc_heap {

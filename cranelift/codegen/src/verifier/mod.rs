@@ -557,6 +557,16 @@ impl<'a> Verifier<'a> {
                     ));
                 }
             }
+            // `volatile` is honoured only on plain loads (alias analysis and
+            // the side-effect predicate read it there); on a store, an
+            // atomic or any other memory op it would be silently ignored.
+            if flags_data.volatile() && !matches!(self.func.dfg.insts[inst], Load { .. }) {
+                errors.report((
+                    inst,
+                    self.context(inst),
+                    "the `volatile` MemFlag is only allowed on load instructions",
+                ));
+            }
         }
 
         match self.func.dfg.insts[inst] {

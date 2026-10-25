@@ -190,7 +190,7 @@ fn pooling_slot_reuse_polls_the_new_store() -> Result<()> {
         assert_eq!(trap(&run.call(&mut a, 10).unwrap_err()), Trap::Interrupt);
         h
     };
-    // Store B reuses the only slot and runs, though A's page is still revoked.
+    // Store B reuses the only slot and runs, though A's word is still set.
     let mut b = Store::new(&engine, ());
     let run = Instance::new(&mut b, &module, &[])?.get_typed_func::<i32, i32>(&mut b, "run")?;
     assert!(old.is_interrupted());
@@ -303,14 +303,33 @@ fn artifact_from_older_fork_abi_is_rejected() -> Result<()> {
     // `+ix2` artifact would run but never be interrupted: it, like any older
     // one, must be refused before any of its code runs.
     let engine = engine(|_| {});
+    // The version suffix and `IX_INTRINSICS_ABI` come from one constant.
+    let cur = format!("+ix{IX_INTRINSICS_ABI}");
+    let old = format!("+ix{}", IX_INTRINSICS_ABI - 1);
+    assert_eq!(cur.len(), old.len());
     let mut bytes = engine.precompile_module(SPIN.as_bytes())?;
     let at = bytes
-        .windows(4)
-        .position(|w| w == b"+ix3")
-        .expect("the artifact carries the +ix3 version");
-    bytes[at..at + 4].copy_from_slice(b"+ix2");
+        .windows(cur.len())
+        .position(|w| w == cur.as_bytes())
+        .unwrap_or_else(|| panic!("the artifact carries the {cur} version"));
+    bytes[at..at + cur.len()].copy_from_slice(old.as_bytes());
     let err = unsafe { Module::deserialize(&engine, &bytes) }.map(|_| ()).unwrap_err();
     let msg = format!("{err:?}");
-    assert!(msg.contains("+ix2") && msg.contains("incompatible"), "{msg}");
+    assert!(msg.contains(&old) && msg.contains("incompatible"), "{msg}");
+    Ok(())
+}
+
+#[test]
+fn custom_version_strategy_still_checks_fork_abi() -> Result<()> {
+    // A custom (or no) version string drops the `+ixN` suffix; the fork ABI
+    // is still recorded in, and checked from, the artifact metadata. Same
+    // ABI round-trips; the mismatch case is the `test_ix_abi_mismatch` unit
+    // test in engine/serialization.rs.
+    let engine = engine(|c| {
+        c.module_version(ModuleVersionStrategy::Custom("custom".into()))
+            .unwrap();
+    });
+    let bytes = engine.precompile_module(SPIN.as_bytes())?;
+    unsafe { Module::deserialize(&engine, &bytes) }?;
     Ok(())
 }

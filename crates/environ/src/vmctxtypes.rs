@@ -157,7 +157,7 @@ macro_rules! for_each_vmctx_type {
                     field {
                         #[readonly]
                         #[can_move]
-                        #[pointee(PollPage as poll_word: AtomicU64)]
+                        #[pointee(PollWord as poll_word: AtomicU64)]
                         poll_ptr: VmPtr<AtomicU64>
                     }
 

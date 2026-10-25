@@ -82,7 +82,10 @@ const BIT_BIG_ENDIAN: u16 = 1 << 3;
 /// A load that must be performed every time it is reached, and whose value
 /// is never assumed: it is never merged with another access, never
 /// forwarded from a store, never hoisted and never deleted.
-const BIT_VOLATILE: u16 = 1 << 4;
+///
+/// Bit 5, not 4: the ix fork's proof-carrying-code branch (ix-pcc) uses bit 4
+/// for `BIT_CHECKED`.
+const BIT_VOLATILE: u16 = 1 << 5;
 
 /// Trap code, if any, for this memory operation.
 const MASK_TRAP_CODE: u16 = ((1 << TRAP_CODE_BITS) - 1) << TRAP_CODE_OFFSET;
@@ -91,6 +94,28 @@ const TRAP_CODE_OFFSET: u16 = 7;
 
 /// Whether this memory operation may be freely moved by the optimizer.
 const BIT_CAN_MOVE: u16 = 1 << 15;
+
+// Every flag bit, and the trap-code field, is distinct: a new flag (here or
+// on another ix branch) that reuses a bit fails to compile.
+const _: () = {
+    let bits = [
+        BIT_ALIGNED,
+        BIT_READONLY,
+        BIT_LITTLE_ENDIAN,
+        BIT_BIG_ENDIAN,
+        BIT_VOLATILE,
+        MASK_TRAP_CODE,
+        BIT_CAN_MOVE,
+    ];
+    let mut seen = 0u16;
+    let mut i = 0;
+    while i < bits.len() {
+        assert!(bits[i] != 0, "MachMemFlags: empty flag");
+        assert!(seen & bits[i] == 0, "MachMemFlags: two flags share a bit");
+        seen |= bits[i];
+        i += 1;
+    }
+};
 
 /// Backend memory-operation flags.
 ///
@@ -106,8 +131,9 @@ pub struct MachMemFlags {
     // - Bit 1: readonly
     // - Bit 2: little-endian
     // - Bit 3: big-endian
-    // - Bit 4: volatile
-    // - Bits 5..6: unused
+    // - Bit 4: unused here (checked, on the ix-pcc branch)
+    // - Bit 5: volatile
+    // - Bit 6: unused
     // - Bits 7..14: trap code
     // - Bit 15: can_move
     bits: u16,

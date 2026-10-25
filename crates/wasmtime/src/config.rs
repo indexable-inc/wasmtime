@@ -121,14 +121,19 @@ impl ModuleVersionStrategy {
     pub fn as_str(&self) -> &str {
         match &self {
             // `+ixN`: the indexable fork's ABI, version
-            // `wasmtime_environ::IX_INTRINSICS_ABI` (keep the two in step):
+            // `wasmtime_environ::IX_INTRINSICS_ABI` (both from
+            // `ix_intrinsics_abi!`):
             // the `ix` intrinsics and the fork's vmctx layout. 2 added the
             // vmctx `poll_ptr` field (poll-page interruption), which moved
             // every field after `epoch_ptr`, so an `ix1` artifact must not
             // load. 3 changed what a poll does with that pointer (test a
             // word, not fault on a page): an `ix2` artifact would never be
             // interrupted.
-            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix3"),
+            Self::WasmtimeVersion => concat!(
+                env!("CARGO_PKG_VERSION_MAJOR"),
+                "+ix",
+                wasmtime_environ::ix_intrinsics_abi!()
+            ),
             Self::Custom(c) => c,
             Self::None => "",
         }

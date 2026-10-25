@@ -1,0 +1,22 @@
+test verifier
+
+;; `volatile` (ix fork) is honoured only on plain loads; anywhere else it
+;; would be silently ignored, so the verifier rejects it.
+
+function %volatile_load(i64) -> i64 {
+block0(v0: i64):
+    v1 = load.i64 notrap aligned volatile v0
+    return v1
+}
+
+function %volatile_store(i64, i64) {
+block0(v0: i64, v1: i64):
+    store notrap aligned volatile v1, v0 ; error: the `volatile` MemFlag is only allowed on load instructions
+    return
+}
+
+function %volatile_atomic_store(i64, i64) {
+block0(v0: i64, v1: i64):
+    atomic_store notrap aligned volatile v1, v0 ; error: the `volatile` MemFlag is only allowed on load instructions
+    return
+}

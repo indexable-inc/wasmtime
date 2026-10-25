@@ -80,9 +80,13 @@ impl InterruptHandle {
     /// Make the store's wasm runnable again. Returns whether it had been
     /// interrupted.
     ///
-    /// Call it on the thread that runs the store, between calls: an
-    /// interrupt that lands after a call returned stays pending until this
-    /// runs.
+    /// Hard requirement: call it only on the thread that runs the store,
+    /// between calls into it, never while its wasm runs. An interrupt that
+    /// lands after a call returned stays pending until this runs. A rearm
+    /// from another thread can clear the word after a poll saw it set but
+    /// before the trap is attributed; that call then fails with a distinct
+    /// error, not [`Trap::Interrupt`](crate::Trap::Interrupt), so a stray
+    /// trap never passes for an interrupt the host issued.
     pub fn rearm(&self) -> bool {
         self.0.word.swap(0, Ordering::SeqCst) != 0
     }

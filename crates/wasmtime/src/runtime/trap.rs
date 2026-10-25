@@ -76,22 +76,18 @@ use wasmtime_environ::{
 /// ```
 pub use wasmtime_environ::Trap;
 
+/// The error for a jit `Interrupt` trap that this store's poll word does not
+/// account for. Deliberately not a [`Trap`]: an embedder that treats
+/// `Trap::Interrupt` as "preempted, may resume or reschedule" must never see
+/// one it did not cause.
 #[cold]
-fn poll_trap_mismatch(pc: usize, addr: Option<usize>, pending: bool) -> ! {
-    cfg_select! {
-        feature = "std" => {
-            eprintln!(
-                "Wasmtime caught an interrupt trap at pc {pc:#x} (memory fault address \
-                 {addr:x?}, this store's poll word set = {pending}). A poll traps only \
-                 through its trap instruction, and only when its store was interrupted; \
-                 this is a bug in Wasmtime."
-            );
-            std::process::abort();
-        }
-        _ => {
-            panic!("poll trap mismatch at pc {pc:#x}, address {addr:x?} ({pending})");
-        }
-    }
+fn poll_trap_mismatch(pc: usize, addr: Option<usize>, pending: bool) -> Error {
+    format_err!(
+        "wasm stopped at an interrupt trap that its store did not request (pc {pc:#x}, \
+         memory fault address {addr:x?}, this store's poll word set = {pending}); \
+         either `InterruptHandle::rearm` ran on another thread while wasm was \
+         running in this store, or compiled code and the runtime disagree"
+    )
 }
 
 #[cold] // traps are exceptional, this helps move handling off the main path
@@ -144,15 +140,19 @@ pub(crate) fn from_runtime_box(
             // when the poll read a nonzero word from this store's cell. So a
             // jit `Interrupt` must have no faulting address (a trap
             // instruction, not a memory fault) and this store's word must be
-            // set: only this thread rearms it, between calls. Anything else
-            // means compiled code and the runtime disagree, so abort rather
-            // than guess which one it was. A memory fault at a poll's load
-            // (always readable host memory) has no trap code, so it is not a
-            // wasm trap and crashes the process like any unknown fault.
+            // set: `InterruptHandle::rearm` must only run on the thread that
+            // runs the store, between calls (documented there). Anything else
+            // (a rearm racing from another thread, or compiled code and the
+            // runtime disagreeing) is reported as a distinct error, never as
+            // `Trap::Interrupt`, so nothing can pass for an interrupt the
+            // host did not issue. The wasm has stopped and unwound as for any
+            // trap, so the process carries on. A memory fault at a poll's
+            // load (always readable host memory) has no trap code, so it is
+            // not a wasm trap and crashes the process like any unknown fault.
             if matches!(trap, CompiledTrap::Normal(Trap::Interrupt)) {
                 let pending = store.poll_interrupt_pending();
                 if faulting_addr.is_some() || !pending {
-                    poll_trap_mismatch(pc, faulting_addr, pending);
+                    err = poll_trap_mismatch(pc, faulting_addr, pending);
                 }
             } else if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
                 err = err.context(fault);

@@ -17,11 +17,24 @@ use serde_derive::{Deserialize, Serialize};
 /// The reserved import module.
 pub const IX_INTRINSIC_MODULE: &str = "ix";
 
+/// The fork's ABI version as a bare integer literal, for `concat!`: the one
+/// place it is written. [`IX_INTRINSICS_ABI`] and the `+ixN` suffix of the
+/// `.cwasm` version string (`ModuleVersionStrategy::as_str`) both come from
+/// it.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! ix_intrinsics_abi {
+    () => {
+        3
+    };
+}
+
 /// Version of the fork's ABI: the intrinsic set and its semantics, and the
 /// fork's changes to the vmctx layout. Part of the engine's compatibility
-/// hash, and the `+ixN` suffix of the `.cwasm` version string
-/// (`ModuleVersionStrategy::as_str`, keep the two in step), so artifacts
-/// compiled against another version are rejected.
+/// hash, the `+ixN` suffix of the `.cwasm` version string, and the artifact
+/// metadata (checked even under `ModuleVersionStrategy::Custom`/`None`), so
+/// artifacts compiled against another version are rejected. Bump it in
+/// [`ix_intrinsics_abi!`].
 ///
 /// - 1: `ix` intrinsics.
 /// - 2: vmctx `poll_ptr` after `epoch_ptr` (poll-page interruption).
@@ -29,7 +42,7 @@ pub const IX_INTRINSIC_MODULE: &str = "ix";
 ///   nonzero) instead of a page whose load faults. An `ix2` artifact would
 ///   still load against an `ix3` runtime but could never be interrupted, so
 ///   it must not load.
-pub const IX_INTRINSICS_ABI: u32 = 3;
+pub const IX_INTRINSICS_ABI: u32 = ix_intrinsics_abi!();
 
 macro_rules! intrinsics {
     ($($(#[$doc:meta])* $variant:ident $name:literal ($($p:ident),*) -> ($($r:ident),*);)*) => {

@@ -186,6 +186,12 @@ pub struct Metadata<'a> {
     isa_flags: TryVec<(&'a str, FlagValue<'a>)>,
     tunables: Tunables,
     features: u64,
+    /// The ix fork's ABI ([`wasmtime_environ::IX_INTRINSICS_ABI`]). The
+    /// version string carries it too, but `ModuleVersionStrategy::Custom`
+    /// and `None` replace or skip that string, so it is checked here as
+    /// well. Last, so an artifact without it fails to parse rather than
+    /// misparse.
+    ix_abi: u32,
 }
 
 impl Metadata<'_> {
@@ -198,15 +204,28 @@ impl Metadata<'_> {
             isa_flags: compiler.isa_flags().into(),
             tunables: engine.tunables().clone(),
             features: engine.features().bits(),
+            ix_abi: wasmtime_environ::IX_INTRINSICS_ABI,
         })
     }
 
     fn check_compatible(mut self, engine: &Engine) -> Result<()> {
+        self.check_ix_abi()?;
         self.check_triple(engine)?;
         self.check_shared_flags(engine)?;
         self.check_isa_flags(engine)?;
         self.check_tunables(&engine.tunables())?;
         self.check_features(&engine.features())?;
+        Ok(())
+    }
+
+    fn check_ix_abi(&self) -> Result<()> {
+        if self.ix_abi != wasmtime_environ::IX_INTRINSICS_ABI {
+            bail!(
+                "Module was compiled for ix fork ABI {}, but this runtime is ABI {}",
+                self.ix_abi,
+                wasmtime_environ::IX_INTRINSICS_ABI
+            );
+        }
         Ok(())
     }
 
@@ -526,6 +545,19 @@ mod test {
         hash::{Hash, Hasher},
     };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_ix_abi_mismatch() -> Result<()> {
+        // Checked from the metadata, so `ModuleVersionStrategy::Custom` and
+        // `None` (which replace or skip the `+ixN` version string) cannot
+        // load an artifact from another fork ABI.
+        let engine = Engine::default();
+        let mut metadata = Metadata::new(&engine)?;
+        metadata.ix_abi = wasmtime_environ::IX_INTRINSICS_ABI - 1;
+        let err = metadata.check_compatible(&engine).unwrap_err();
+        assert!(err.to_string().contains("ix fork ABI"), "{err}");
+        Ok(())
+    }
 
     #[test]
     fn test_architecture_mismatch() -> Result<()> {
