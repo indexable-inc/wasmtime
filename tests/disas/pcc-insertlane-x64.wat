@@ -70,7 +70,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movdqu  0x14(%rip), %xmm0
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pinsrb  $1, (%rdi, %rsi), %xmm0
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -87,7 +87,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movdqu  0x14(%rip), %xmm0
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pinsrw  $1, (%rdi, %rsi), %xmm0
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -103,7 +103,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movdqu  0x14(%rip), %xmm0
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pinsrd  $1, (%rdi, %rsi), %xmm0
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -120,7 +120,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movdqu  0x14(%rip), %xmm0
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pinsrq  $1, (%rdi, %rsi), %xmm0
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -134,7 +134,7 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       insertps $0, (%rdi, %rsi), %xmm0
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -145,7 +145,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movq    %rdi, %r9
 ;;       movl    %edx, %edi
-;;       movq    0x40(%r9), %r8
+;;       movq    0x48(%r9), %r8
 ;;       movsd   (%r8, %rdi), %xmm7
 ;;       movlhps %xmm7, %xmm0
 ;;       movq    %rbp, %rsp
@@ -157,7 +157,7 @@
 ;;       movq    %rsp, %rbp
 ;;       movq    %rdi, %r9
 ;;       movl    %edx, %edi
-;;       movq    0x40(%r9), %r8
+;;       movq    0x48(%r9), %r8
 ;;       movsd   (%r8, %rdi), %xmm7
 ;;       movsd   %xmm7, %xmm0
 ;;       movq    %rbp, %rsp
@@ -169,7 +169,7 @@
 ;;       movq    %rsp, %rbp
 ;;       pshufd  $0xee, %xmm0, %xmm6
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       movsd   %xmm6, (%rdi, %rsi)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -180,7 +180,7 @@
 ;;       movq    %rsp, %rbp
 ;;       pshufd  $1, %xmm0, %xmm6
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       movss   %xmm6, (%rdi, %rsi)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -192,7 +192,7 @@
 ;;       pextrb  $1, %xmm0, %r8d
 ;;       movsbl  %r8b, %r8d
 ;;       movl    %edx, %r9d
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       movb    %r8b, (%rdi, %r9)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -204,7 +204,7 @@
 ;;       pextrw  $1, %xmm0, %r8d
 ;;       movswl  %r8w, %r8d
 ;;       movl    %edx, %r9d
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       movw    %r8w, (%rdi, %r9)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -214,7 +214,7 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pextrd  $1, %xmm0, (%rdi, %rsi)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
@@ -224,7 +224,7 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       movq    0x40(%rdi), %rdi
+;;       movq    0x48(%rdi), %rdi
 ;;       pextrq  $1, %xmm0, (%rdi, %rsi)
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
