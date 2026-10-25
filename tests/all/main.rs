@@ -40,6 +40,7 @@ mod invoke_func_via_table;
 mod ix_bulk_preempt;
 mod ix_poll_bound;
 mod ix_check_trim;
+mod ix_compile_dos;
 mod ix_indirect;
 mod ix_wasm_cc;
 mod limits;
