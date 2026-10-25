@@ -420,7 +420,25 @@ impl<'func, I: VCodeInst> Lower<'func, I> {
             for &param in f.dfg.block_params(bb) {
                 let ty = f.dfg.value_type(param);
                 if value_regs[param].is_invalid() {
-                    let regs = vregs.alloc_with_maybe_fact(ty, f.dfg.facts[param].clone())?;
+                    // PCC: a symbolic fact (a `Def` name, or a bound in
+                    // terms of one) on a non-entry block parameter would be
+                    // checked only by name at each branch, so in a loop a
+                    // name bound in one iteration could carry into the
+                    // next. Keep only numeric facts there.
+                    let fact = f.dfg.facts[param].clone().filter(|fact| {
+                        Some(bb) == f.layout.entry_block()
+                            || matches!(fact, Fact::Range { .. } | Fact::Mem { .. })
+                    });
+                    let regs = vregs.alloc_with_maybe_fact(ty, fact)?;
+                    if Some(bb) == f.layout.entry_block() {
+                        if let Some(fact) = &f.dfg.facts[param] {
+                            for reg in regs.regs() {
+                                if let Some(v) = reg.to_virtual_reg() {
+                                    vregs.entry_facts.insert(v.into(), fact.clone());
+                                }
+                            }
+                        }
+                    }
                     value_regs[param] = regs;
                     trace!("bb {} param {}: regs {:?}", bb, param, regs);
                 }

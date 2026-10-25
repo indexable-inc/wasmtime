@@ -1853,7 +1853,8 @@ impl FuncEnvironment<'_> {
             // guard, or no signal-based traps) are not proven yet: the
             // checker cannot yet follow a `DynamicMemory` bound through the
             // fused 32-bit address arithmetic x64 emits for them. Their
-            // accesses stay unchecked (strict mode will reject them).
+            // accesses stay unchecked; a planned strict mode will reject them
+            // (wasm-host docs/future/proof-carrying-code.md).
             if !memory.can_elide_bounds_check(&tunables, host_page_size_log2) {
                 continue;
             }

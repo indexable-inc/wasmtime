@@ -361,12 +361,13 @@ fn compute_asm_addr(
 }
 
 /// The address sum of a 32-bit `lea`, from the inputs' numeric ranges only.
-/// A range fact of any width bounds at least the register's low 32 bits,
+/// A range fact at least 32 bits wide bounds the register's low 32 bits,
 /// which are all a 32-bit `lea` reads, so each is used as a 64-bit range; the
 /// caller keeps the result only when it fits in 32 bits, where it is exact.
+/// A narrower fact says nothing about bits above its width, so it is not used.
 fn compute_leal(ctx: &FactContext, vcode: &VCode<Inst>, amode: &asm::Amode<Gpr>) -> Option<Fact> {
     let range = |r: Reg| match get_fact_or_default(vcode, r, 64) {
-        Fact::Range { min, max, .. } => Some(Fact::Range {
+        Fact::Range { bit_width, min, max } if bit_width >= 32 => Some(Fact::Range {
             bit_width: 64,
             min,
             max,
@@ -492,6 +493,11 @@ fn check_external(
         checked_load: false,
     };
     if let Some(m) = inst.pcc_mem() {
+        // `bt m, r` reads at `m + (r >> 3)` (a signed bit offset), not at
+        // `m`, so its summary does not bound the access.
+        if m.amode.checked() && matches!(inst, I::btw_mr(_) | I::btl_mr(_) | I::btq_mr(_)) {
+            return Err(PccError::UnsupportedFact);
+        }
         if m.amode.checked() {
             log::debug!("pcc: checking {:?} access of {} bytes", m.kind, m.bytes);
             let ty = access_type(m.bytes)?;

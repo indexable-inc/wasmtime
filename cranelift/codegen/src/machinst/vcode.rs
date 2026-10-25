@@ -211,6 +211,11 @@ pub struct VCode<I: VCodeInst> {
     /// derived at its definition (a verified fact about its value).
     def_shadows: FxHashMap<VReg, Fact>,
 
+    /// PCC: the facts the CLIF states on the entry block's parameters, by
+    /// vreg. These are the only trusted facts: the checker accepts a fact
+    /// on a register defined by `Args` only if one of these implies it.
+    pub(crate) pcc_entry_facts: FxHashMap<VReg, Fact>,
+
     /// PCC: while set, a `Def` vreg read as an input means its derived fact
     /// (`def_shadows`) instead of its symbol. See `check_vcode_facts`.
     pub(crate) pcc_numeric: bool,
@@ -575,6 +580,7 @@ impl<I: VCodeInst> VCodeBuilder<I> {
     pub fn build(mut self, mut vregs: VRegAllocator<I>) -> VCode<I> {
         self.vcode.vreg_types = take(&mut vregs.vreg_types);
         self.vcode.facts = take(&mut vregs.facts);
+        self.vcode.pcc_entry_facts = take(&mut vregs.entry_facts);
 
         if self.direction == VCodeBuildDirection::Backward {
             self.reverse_and_finalize(&vregs);
@@ -678,6 +684,7 @@ impl<I: VCodeInst> VCode<I> {
             debug_value_labels: vec![],
             facts: vec![],
             def_shadows: FxHashMap::default(),
+            pcc_entry_facts: FxHashMap::default(),
             pcc_numeric: false,
             log2_min_function_alignment,
         }
@@ -1786,6 +1793,10 @@ pub struct VRegAllocator<I> {
     /// Facts on VRegs, for proof-carrying code.
     facts: Vec<Option<Fact>>,
 
+    /// PCC: facts on the entry block's parameters, recorded at allocation
+    /// (before any vreg alias can merge other facts into them).
+    pub(crate) entry_facts: FxHashMap<VReg, Fact>,
+
     /// The type of instruction that this allocator makes registers for.
     _inst: core::marker::PhantomData<I>,
 }
@@ -1801,6 +1812,7 @@ impl<I: VCodeInst> VRegAllocator<I> {
             vreg_aliases: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
             deferred_error: None,
             facts: Vec::with_capacity(capacity),
+            entry_facts: FxHashMap::default(),
             _inst: core::marker::PhantomData::default(),
         }
     }

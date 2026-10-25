@@ -165,7 +165,7 @@ pub(crate) fn check(
                     ctx,
                     64,
                     size.bits().into(),
-                    ctx.offset(rn, size.bits().into(), -(k as i64)),
+                    ctx.offset(rn, size.bits().into(), (k as i64).wrapping_neg()),
                 )
             } else {
                 clamp_range(ctx, 64, size.bits().into(), None)

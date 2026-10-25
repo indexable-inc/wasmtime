@@ -75,7 +75,7 @@
 use crate::ir;
 use crate::ir::types::*;
 use crate::isa::TargetIsa;
-use crate::machinst::{BlockIndex, InsnIndex, LowerBackend, VCode};
+use crate::machinst::{BlockIndex, InsnIndex, LowerBackend, MachInst as _, VCode};
 use crate::trace;
 use core::fmt;
 use regalloc2::Function as _;
@@ -1058,12 +1058,23 @@ impl<'a> FactContext<'a> {
             ) if bw_lhs == bw_rhs && add_width >= *bw_lhs => {
                 let computed_min = min_lhs.checked_add(*min_rhs)?;
                 let computed_max = max_lhs.checked_add(*max_rhs)?;
-                let computed_max = core::cmp::min(max_value_for_width(add_width), computed_max);
-                Some(Fact::Range {
-                    bit_width: *bw_lhs,
-                    min: computed_min,
-                    max: computed_max,
-                })
+                let width_max = max_value_for_width(add_width);
+                if computed_max > width_max {
+                    // The add can wrap at `add_width`, so a wrapped result
+                    // can be anywhere below the width's maximum: clamping
+                    // only the max would keep a wrong (too high) min.
+                    Some(Fact::Range {
+                        bit_width: *bw_lhs,
+                        min: 0,
+                        max: width_max,
+                    })
+                } else {
+                    Some(Fact::Range {
+                        bit_width: *bw_lhs,
+                        min: computed_min,
+                        max: computed_max,
+                    })
+                }
             }
 
             (
@@ -1128,7 +1139,7 @@ impl<'a> FactContext<'a> {
                     min: min_static,
                     max: max_static,
                 },
-            ) if bw_static == bw_dynamic => {
+            ) if bw_static == bw_dynamic && add_width >= *bw_dynamic => {
                 let min = Expr::offset(min_dynamic, i64::try_from(*min_static).ok()?)?;
                 let max = Expr::offset(max_dynamic, i64::try_from(*max_static).ok()?)?;
                 Some(Fact::DynamicRange {
@@ -1163,7 +1174,7 @@ impl<'a> FactContext<'a> {
                     max: max_mem,
                     nullable: false,
                 },
-            ) if *bit_width == self.pointer_width => {
+            ) if *bit_width == self.pointer_width && add_width >= self.pointer_width => {
                 let min = Expr::add(min_mem, min_range)?;
                 let max = Expr::add(max_mem, max_range)?;
                 Some(Fact::DynamicMem {
@@ -1402,10 +1413,12 @@ impl<'a> FactContext<'a> {
         }
 
         let compute_offset = |base: u64| -> Option<u64> {
+            // `unsigned_abs`, not `-offset`: a hostile constant can be
+            // `i64::MIN`, whose negation overflows.
             if offset >= 0 {
-                base.checked_add(u64::try_from(offset).unwrap())
+                base.checked_add(offset.unsigned_abs())
             } else {
-                base.checked_sub(u64::try_from(-offset).unwrap())
+                base.checked_sub(offset.unsigned_abs())
             }
         };
 
@@ -1417,6 +1430,10 @@ impl<'a> FactContext<'a> {
             } if *bit_width == width => {
                 let min = compute_offset(*min)?;
                 let max = compute_offset(*max)?;
+                // An offset that leaves the width wraps at it.
+                if max > max_value_for_width(width) {
+                    return None;
+                }
                 Some(Fact::Range {
                     bit_width: *bit_width,
                     min,
@@ -1441,7 +1458,7 @@ impl<'a> FactContext<'a> {
                 min_offset: mem_min_offset,
                 max_offset: mem_max_offset,
                 nullable: false,
-            } => {
+            } if width >= self.pointer_width => {
                 let min_offset = compute_offset(*mem_min_offset)?;
                 let max_offset = compute_offset(*mem_max_offset)?;
                 Some(Fact::Mem {
@@ -1456,7 +1473,7 @@ impl<'a> FactContext<'a> {
                 min,
                 max,
                 nullable: false,
-            } => {
+            } if width >= self.pointer_width => {
                 let min = Expr::offset(min, offset)?;
                 let max = Expr::offset(max, offset)?;
                 Some(Fact::DynamicMem {
@@ -1940,7 +1957,7 @@ impl StructEq {
         const PURE: &[&str] = &[
             "mov", "lea", "add", "sub", "and", "or", "xor", "shl", "shr", "sar", "rol", "ror",
             "imul", "neg", "not", "eor", "lsl", "lsr", "asr", "ubfx", "sbfx", "uxt", "sxt",
-            "tzcnt", "lzcnt", "popcnt", "bsf", "bsr", "bswap", "clz", "rbit", "mul",
+            "tzcnt", "lzcnt", "popcnt", "bswap", "clz", "rbit", "mul",
         ];
         const FLAGS_IN: &[&str] = &["cmov", "set"];
         const FLAGS_OUT: &[&str] = &["cmp", "test"];
@@ -1960,7 +1977,11 @@ impl StructEq {
                     .skip(1)
                     .map(|g| g.split(')').next().unwrap_or(""))
                     .any(|g| !g.contains("<-") && g != "%rip"));
-        if !known || touches_memory {
+        // `bsf`/`bsr` (not listed) leave the destination undefined on a
+        // zero input. A physical register in the text (`movq %rsp, %v1`, a
+        // pinned register) is read at a point in time, so two such reads
+        // are not the same value.
+        if !known || touches_memory || mentions_preg(&text) {
             return None;
         }
         let uses: alloc::vec::Vec<usize> = ops
@@ -1970,7 +1991,10 @@ impl StructEq {
             .collect();
         // `xor r, r` is zero whatever `r` holds (the zeroing idiom, whose
         // input is often an `uninit` vreg).
-        if mnemonic.starts_with("xor") && uses.len() == 2 && uses[0] == uses[1] {
+        // Only the 32- and 64-bit forms zero the whole register: `xorb` and
+        // `xorw` keep the upper bits.
+        let zeroing = ["xorl", "xorq", "eor"].iter().any(|p| mnemonic.starts_with(p));
+        if zeroing && uses.len() == 2 && uses[0] == uses[1] {
             return Some(alloc::string::String::from("ZERO"));
         }
         let mut text = match def {
@@ -2005,6 +2029,27 @@ impl StructEq {
 }
 
 /// `text` with each register token `%v<v>` replaced by `with`.
+/// Does a pre-regalloc instruction's text name a physical register? Virtual
+/// registers print as `%v<n>`. x64 physical registers print with `%`
+/// (`%rsp`; `%rip` is a constant address); aarch64 ones bare (`x21`, `w3`,
+/// `sp`, `fp`, `lr`, `xzr`).
+fn mentions_preg(text: &str) -> bool {
+    let x64 = text.match_indices('%').any(|(i, _)| {
+        let rest = &text[i + 1..];
+        !(rest.starts_with('v') && rest[1..].starts_with(|c: char| c.is_ascii_digit()))
+            && !rest.starts_with("rip")
+    });
+    let aarch64 = text
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '%')
+        .any(|t| {
+            matches!(t, "sp" | "fp" | "lr" | "xzr" | "wzr")
+                || (t.len() >= 2
+                    && (t.starts_with('x') || t.starts_with('w'))
+                    && t[1..].chars().all(|c| c.is_ascii_digit()))
+        });
+    x64 || aarch64
+}
+
 fn replace_vreg(text: &str, v: usize, with: &str) -> alloc::string::String {
     let name = alloc::format!("%v{v}");
     let mut out = alloc::string::String::with_capacity(text.len());
@@ -2081,6 +2126,28 @@ pub fn check_vcode_facts<B: LowerBackend + TargetIsa>(
                             "pcc: shapes {} vs {}",
                             structural.shape(vcode, first.vreg(), StructEq::DEPTH),
                             structural.shape(vcode, vreg.vreg(), StructEq::DEPTH)
+                        );
+                        first_err.get_or_insert(PccError::UnsupportedFact);
+                    }
+                }
+            }
+
+            // `Args` defines the entry block's parameters, whose CLIF facts
+            // are trusted axioms. Accept a fact on such a register only if
+            // the CLIF fact recorded at lowering implies it: a vreg alias
+            // can merge a stronger fact into it later, and that one is not
+            // trusted.
+            if vcode[inst].is_args() {
+                for vreg in vcode.inst_defs_with_facts(inst) {
+                    let fact = vcode.vreg_fact(vreg).unwrap();
+                    let ok = vcode
+                        .pcc_entry_facts
+                        .get(&vreg)
+                        .is_some_and(|trusted| ctx.subsumes(trusted, fact));
+                    if !ok {
+                        log::info!(
+                            "PCC error UnsupportedFact in {}: untrusted fact {fact} on argument {vreg:?}",
+                            f.name
                         );
                         first_err.get_or_insert(PccError::UnsupportedFact);
                     }
