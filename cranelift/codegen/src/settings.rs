@@ -488,6 +488,7 @@ mod tests {
         let actual = f.to_string();
         let expected = r#"[shared]
 regalloc_algorithm = "backtracking"
+regalloc_max_splits = 0
 opt_level = "none"
 tls_model = "none"
 stack_switch_model = "none"

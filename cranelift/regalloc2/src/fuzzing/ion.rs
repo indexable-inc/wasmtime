@@ -23,6 +23,7 @@ pub struct TestCase {
     func: func::Func,
     annotate: bool,
     check_ssa: bool,
+    max_splits: u8,
 }
 
 impl Arbitrary<'_> for TestCase {
@@ -30,10 +31,13 @@ impl Arbitrary<'_> for TestCase {
         let func = func::Func::arbitrary_with_options(u, &OPTIONS)?;
         let annotate = bool::arbitrary(u)?;
         let check_ssa = bool::arbitrary(u)?;
+        // 0 is the default (2); also cover larger split budgets.
+        let max_splits = *u.choose(&[0u8, 1, 2, 4, 8, 16, 32])?;
         Ok(TestCase {
             func,
             annotate,
             check_ssa,
+            max_splits,
         })
     }
 }
@@ -49,6 +53,7 @@ pub fn check(t: TestCase) {
         func,
         annotate,
         check_ssa,
+        max_splits,
     } = &t;
     log::trace!("func:\n{func:?}");
 
@@ -59,7 +64,14 @@ pub fn check(t: TestCase) {
     }
 
     CTX.with(|ctx| {
-        ion::run(func, &env, &mut *ctx.borrow_mut(), *annotate, *check_ssa)
+        ion::run(
+            func,
+            &env,
+            &mut *ctx.borrow_mut(),
+            *annotate,
+            *check_ssa,
+            *max_splits,
+        )
             .expect("regalloc did not succeed");
 
         let mut checker = checker::Checker::new(func, &env);

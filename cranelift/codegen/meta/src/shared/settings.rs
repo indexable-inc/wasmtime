@@ -44,6 +44,19 @@ pub(crate) fn define() -> SettingGroup {
         vec!["backtracking", "single_pass"],
     );
 
+    settings.add_num(
+        "regalloc_max_splits",
+        "Splits per original bundle before the backtracking allocator falls back to minimal bundles.",
+        r#"
+            regalloc2's backtracking allocator splits a bundle at most this many times
+            (per spillset) before it splits the rest into minimal per-use bundles plus a
+            spill bundle, which reloads the value at every use. 0 means regalloc2's
+            default (2). Each split costs time linear in the bundle, so compile time
+            stays bounded by this value times the function size.
+        "#,
+        0,
+    );
+
     settings.add_enum(
         "opt_level",
         "Optimization level for generated code.",

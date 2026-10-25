@@ -111,6 +111,7 @@ pub fn run<F: Function>(
     ctx: &mut Ctx,
     enable_annotations: bool,
     enable_ssa_checker: bool,
+    max_splits_per_spillset: u8,
 ) -> Result<(), RegAllocError> {
     ctx.cfginfo.init(func, &mut ctx.cfginfo_ctx)?;
 
@@ -119,6 +120,11 @@ pub fn run<F: Function>(
     }
 
     ctx.annotations_enabled = enable_annotations;
+    ctx.max_splits_per_spillset = if max_splits_per_spillset == 0 {
+        data_structures::MAX_SPLITS_PER_SPILLSET
+    } else {
+        max_splits_per_spillset
+    };
     let mut env = Env::new(func, mach_env, ctx);
     env.init()?;
 

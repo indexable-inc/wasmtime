@@ -19,7 +19,7 @@ use super::{
 };
 use crate::{
     ion::data_structures::{
-        CodeRange, Use, BUNDLE_MAX_NORMAL_SPILL_WEIGHT, MAX_SPLITS_PER_SPILLSET,
+        CodeRange, Use, BUNDLE_MAX_NORMAL_SPILL_WEIGHT,
         MINIMAL_BUNDLE_SPILL_WEIGHT, MINIMAL_FIXED_BUNDLE_SPILL_WEIGHT,
         MINIMAL_LIMITED_BUNDLE_SPILL_WEIGHT,
     },
@@ -433,7 +433,7 @@ impl<'a, F: Function> Env<'a, F> {
         // to a "minimal bundles and spill bundle" setup for this
         // bundle. See the doc-comment on
         // `split_into_minimal_bundles()` above for more.
-        if self.ctx.spillsets[spillset].splits >= MAX_SPLITS_PER_SPILLSET {
+        if self.ctx.spillsets[spillset].splits >= self.ctx.max_splits_per_spillset {
             self.split_into_minimal_bundles(bundle, hint);
             return;
         }

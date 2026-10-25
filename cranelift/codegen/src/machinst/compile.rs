@@ -53,6 +53,7 @@ pub fn compile<B: LowerBackend + TargetIsa>(
         let _tt = timing::regalloc();
         let mut options = RegallocOptions::default();
         options.verbose_log = b.flags().regalloc_verbose_logs();
+        options.max_splits_per_spillset = b.flags().regalloc_max_splits();
 
         if cfg!(debug_assertions) {
             options.validate_ssa = true;

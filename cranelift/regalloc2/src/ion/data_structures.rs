@@ -547,6 +547,9 @@ pub struct Ctx {
     // ProgPoint to insert into the final allocated program listing.
     pub(crate) debug_annotations: FxHashMap<ProgPoint, Vec<String>>,
     pub(crate) annotations_enabled: bool,
+    /// Splits per original bundle before falling back to minimal bundles
+    /// (`RegallocOptions::max_splits_per_spillset`).
+    pub(crate) max_splits_per_spillset: u8,
 
     // Cached allocation for `try_to_allocate_bundle_to_reg` to avoid allocating
     // a new HashSet on every call.
@@ -618,6 +621,7 @@ impl Default for Ctx {
             allocated_bundle_count: Default::default(),
             debug_annotations: Default::default(),
             annotations_enabled: Default::default(),
+            max_splits_per_spillset: MAX_SPLITS_PER_SPILLSET,
             conflict_set: Default::default(),
             output: Default::default(),
             scratch_conflicts: Default::default(),

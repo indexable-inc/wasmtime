@@ -1708,7 +1708,14 @@ pub fn run_with_ctx<'a, F: Function>(
     ctx: &'a mut Ctx,
 ) -> Result<&'a Output, RegAllocError> {
     match options.algorithm {
-        Algorithm::Ion => ion::run(func, env, ctx, options.verbose_log, options.validate_ssa)?,
+        Algorithm::Ion => ion::run(
+            func,
+            env,
+            ctx,
+            options.verbose_log,
+            options.validate_ssa,
+            options.max_splits_per_spillset,
+        )?,
         Algorithm::Fastalloc => {
             ctx.output = fastalloc::run(func, env, options.verbose_log, options.validate_ssa)?
         }
@@ -1734,6 +1741,13 @@ pub struct RegallocOptions {
 
     /// The register allocation algorithm to be used.
     pub algorithm: Algorithm,
+
+    /// How many times the backtracking allocator may split the bundles of
+    /// one original bundle (one spillset) before it falls back to minimal
+    /// bundles plus a spill bundle (a reload at every use). 0 means the
+    /// default (2). Each split costs time linear in the bundle, so the
+    /// total stays O(limit * function size).
+    pub max_splits_per_spillset: u8,
 }
 
 pub(crate) trait VecExt<T> {
