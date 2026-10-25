@@ -504,8 +504,10 @@ pub enum IxWasmCc {
     /// x86-64 adds rax (5 wasm integer parameters in registers); aarch64 adds
     /// x9..x15 (11). The added registers are already caller-saved.
     Wide,
-    /// As `Wide`; on x86-64 also r12 and r13 (7 wasm integer parameters),
-    /// which stop being callee-saved for wasm functions.
+    /// Not supported: `Engine::new` refuses it (it measured slower than
+    /// `Wide`). Kept, in this position, only because artifacts serialize this
+    /// enum by variant index; never remove or reorder it.
+    #[doc(hidden)]
     WideTrade,
 }
 
@@ -532,7 +534,6 @@ impl FromStr for IxWasmCc {
         match s {
             "standard" => Ok(IxWasmCc::Standard),
             "wide" => Ok(IxWasmCc::Wide),
-            "wide_trade" | "wide-trade" => Ok(IxWasmCc::WideTrade),
             _ => Err(format!("unknown ix wasm calling convention `{s}`")),
         }
     }

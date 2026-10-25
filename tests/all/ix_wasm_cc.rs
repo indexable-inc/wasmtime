@@ -10,7 +10,7 @@
 
 use wasmtime::*;
 
-const ALL: [IxWasmCc; 3] = [IxWasmCc::Standard, IxWasmCc::Wide, IxWasmCc::WideTrade];
+const ALL: [IxWasmCc; 2] = [IxWasmCc::Standard, IxWasmCc::Wide];
 
 fn supported(cc: IxWasmCc) -> bool {
     cc == IxWasmCc::Standard || cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
@@ -1094,12 +1094,18 @@ fn engine_refuses_unsupported() -> Result<()> {
     for (s, cc) in [
         ("standard", IxWasmCc::Standard),
         ("wide", IxWasmCc::Wide),
-        ("wide_trade", IxWasmCc::WideTrade),
     ] {
         assert_eq!(s.parse::<IxWasmCc>(), Ok(cc));
         assert_eq!(cc.to_string(), s);
     }
     assert!("bogus".parse::<IxWasmCc>().is_err());
+    // `WideTrade` is not supported: not parsed, refused by `Engine::new` on
+    // every target, the host's included.
+    assert!("wide_trade".parse::<IxWasmCc>().is_err());
+    let mut c = Config::new();
+    c.ix_wasm_cc(IxWasmCc::WideTrade);
+    let e = Engine::new(&c).err().expect("WideTrade must be refused").to_string();
+    assert!(e.contains("WideTrade"), "{e}");
     assert_eq!(IxWasmCc::default(), IxWasmCc::Standard);
     assert_eq!(Engine::default().get_ix_wasm_cc(), IxWasmCc::Standard);
 
@@ -1108,7 +1114,7 @@ fn engine_refuses_unsupported() -> Result<()> {
     } else {
         "pulley32"
     };
-    for cc in [IxWasmCc::Wide, IxWasmCc::WideTrade] {
+    for cc in [IxWasmCc::Wide] {
         let mut c = Config::new();
         c.strategy(Strategy::Winch);
         let ok = Engine::new(&c).is_ok();

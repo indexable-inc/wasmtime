@@ -1052,8 +1052,7 @@ impl Config {
     /// only 4 wasm integer parameters in registers (x86_64 rdi..r9, aarch64
     /// x2..x7); the rest go on the stack. [`IxWasmCc::Wide`] adds rax on
     /// x86_64 (5 in registers) and x9..x15 on aarch64 (11), all registers that
-    /// are already caller-saved. [`IxWasmCc::WideTrade`] also adds r12 and r13 on
-    /// x86_64 (7), which then stop being callee-saved for wasm functions.
+    /// are already caller-saved.
     ///
     /// Only calls into wasm-convention code change: wasm functions, and the
     /// Cranelift-compiled trampolines between wasm and the host and builtins,
@@ -2918,6 +2917,11 @@ impl Config {
         }
         if self.max_wasm_stack == 0 {
             bail!("max_wasm_stack size cannot be zero");
+        }
+        // ix fork: `WideTrade` (x86-64 r12/r13 as arguments) measured slower
+        // than `Wide`; the variant stays only for its serialized index.
+        if self.tunables.ix_wasm_cc == Some(IxWasmCc::WideTrade) {
+            bail!("ix_wasm_cc: WideTrade is not supported");
         }
         if let Some(slack) = self.tunables.ix_leaf_stack_slack {
             let slack = usize::try_from(slack)?;

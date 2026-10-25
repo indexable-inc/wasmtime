@@ -137,7 +137,7 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
     }
 
     // ix fork: run the whole suite with the wide wasm-to-wasm calling
-    // convention (`WASMTIME_TEST_IX_WASM_CC=wide|wide_trade`). Native Cranelift
+    // convention (`WASMTIME_TEST_IX_WASM_CC=wide`). Native Cranelift
     // only; the option refuses Pulley and Winch.
     if matches!(config.compiler, Compiler::CraneliftNative) {
         if let Ok(v) = std::env::var("WASMTIME_TEST_IX_WASM_CC") {

@@ -110,6 +110,9 @@ pub const IX_FEATURES: &[(&str, u32)] = &[
     // a zero entry falls back to the checked call, rows ranked by sites
     // per entry under an 8-per-element cap.
     ("static-call-indirect", 2),
+    // `ix_wasm_cc`: Cranelift `tail_arg_regs`, the integer argument
+    // registers of every wasm-to-wasm call and trampoline.
+    ("wasm-cc", 1),
 ];
 
 /// Serialized struct schemas covered by the hash.
@@ -222,6 +225,7 @@ mod tests {
         assert!(Tunables::IX_FIELDS.contains("ix_static_call_indirect"));
         assert!(Module::IX_SCHEMA.contains("ix_intrinsics"));
         assert!(Tunables::IX_FIELDS.contains("table_lazy_init"));
+        assert!(Tunables::IX_FIELDS.contains("ix_wasm_cc"));
         assert_eq!(IX_ABI_TAG.len(), 16);
     }
 

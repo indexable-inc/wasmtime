@@ -465,16 +465,15 @@ impl Config {
 
         // ix fork: wasm-to-wasm argument registers. Native Cranelift on x86_64
         // and aarch64 only (the option refuses everything else).
-        // `WASMTIME_FUZZ_IX_WASM_CC=standard|wide|wide_trade` forces one value.
+        // `WASMTIME_FUZZ_IX_WASM_CC=standard|wide` forces one value.
         if self.wasmtime.compiler_strategy == CompilerStrategy::CraneliftNative
             && cfg!(any(target_arch = "x86_64", target_arch = "aarch64"))
         {
             let cc = match std::env::var("WASMTIME_FUZZ_IX_WASM_CC") {
                 Ok(v) => v.parse().expect("WASMTIME_FUZZ_IX_WASM_CC"),
-                Err(_) => match self.wasmtime.ix_wasm_cc % 3 {
+                Err(_) => match self.wasmtime.ix_wasm_cc % 2 {
                     0 => wasmtime::IxWasmCc::Standard,
-                    1 => wasmtime::IxWasmCc::Wide,
-                    _ => wasmtime::IxWasmCc::WideTrade,
+                    _ => wasmtime::IxWasmCc::Wide,
                 },
             };
             log::debug!("ix_wasm_cc = {cc}");
@@ -636,7 +635,7 @@ pub struct WasmtimeConfig {
     inlining: Option<Inlining>,
     inlining_small_callee_size: Option<u32>,
     inlining_sum_size_threshold: Option<u32>,
-    /// ix fork: `Config::ix_wasm_cc`, modulo 3 (standard, wide, wide_trade).
+    /// ix fork: `Config::ix_wasm_cc`, modulo 2 (standard, wide).
     ix_wasm_cc: u8,
     use_precompiled_cwasm: bool,
     async_stack_zeroing: bool,
