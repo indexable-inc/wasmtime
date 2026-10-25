@@ -1,0 +1,252 @@
+test compile precise-output
+set tail_arg_regs=wide
+set preserve_frame_pointers
+target x86_64
+
+;; `tail` with more integer argument registers (wide).
+
+function %callee10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64, v9: i64):
+    v10 = iadd v6, v7
+    v11 = iadd v8, v9
+    v12 = iadd v10, v11
+    return v12
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movq <offset:0>+-0x20(%rbp), %rdx
+;   movq <offset:0>+-0x18(%rbp), %rsi
+;   movq <offset:0>+-0x10(%rbp), %rdi
+;   leaq (%rax, %rdx), %r10
+;   leaq (%rsi, %rdi), %r11
+;   leaq (%r10, %r11), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq $0x20
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movq 0x10(%rbp), %rdx
+;   movq 0x18(%rbp), %rsi
+;   movq 0x20(%rbp), %rdi
+;   leaq (%rax, %rdx), %r10
+;   leaq (%rsi, %rdi), %r11
+;   leaq (%r10, %r11), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq $0x20
+
+function %caller10(i64) -> i64 tail {
+    fn0 = %callee10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail
+block0(v0: i64):
+    v1 = call fn0(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+    return v1
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+; block0:
+;   movq %rdi, (%rsp)
+;   movq %rdi, 8(%rsp)
+;   movq %rdi, 0x10(%rsp)
+;   load_ext_name %callee10+0, %r10
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   call    *%r10
+;   addq $0x20, %rsp
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+; block1: ; offset 0x8
+;   movq %rdi, (%rsp)
+;   movq %rdi, 8(%rsp)
+;   movq %rdi, 0x10(%rsp)
+;   movabsq $0, %r10 ; reloc_external Abs8 %callee10 0
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   callq *%r10
+;   subq $0x20, %rsp
+;   addq $0x20, %rsp
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %tail_caller10(i64) -> i64 tail {
+    fn0 = %callee10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail
+block0(v0: i64):
+    return_call fn0(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+;   movq %rsp, %rbp
+;   movq 0x20(%rsp), %r11
+;   movq %r11, (%rsp)
+;   movq 0x28(%rsp), %r11
+;   movq %r11, 8(%rsp)
+; block0:
+;   movq %rdi, <offset:0>+-0x20(%rbp)
+;   movq %rdi, <offset:0>+-0x18(%rbp)
+;   movq %rdi, <offset:0>+-0x10(%rbp)
+;   load_ext_name %callee10+0, %r10
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   return_call_unknown %r10 (32) tmp=%r11 %rdi=%rdi %rsi=%rsi %rdx=%rdx %rcx=%rcx %r8=%r8 %r9=%r9 %rax=%rax
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+;   movq %rsp, %rbp
+;   movq 0x20(%rsp), %r11
+;   movq %r11, (%rsp)
+;   movq 0x28(%rsp), %r11
+;   movq %r11, 8(%rsp)
+; block1: ; offset 0x1e
+;   movq %rdi, 0x10(%rbp)
+;   movq %rdi, 0x18(%rbp)
+;   movq %rdi, 0x20(%rbp)
+;   movabsq $0, %r10 ; reloc_external Abs8 %callee10 0
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   movq %rbp, %rsp
+;   popq %rbp
+;   jmpq *%r10
+
+function %tail_indirect10(i64, i64) -> i64 tail {
+    sig0 = (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail
+block0(v0: i64, v1: i64):
+    return_call_indirect sig0, v1(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+;   movq %rsp, %rbp
+;   movq 0x20(%rsp), %r11
+;   movq %r11, (%rsp)
+;   movq 0x28(%rsp), %r11
+;   movq %r11, 8(%rsp)
+; block0:
+;   movq %rdi, <offset:0>+-0x20(%rbp)
+;   movq %rdi, <offset:0>+-0x18(%rbp)
+;   movq %rdi, <offset:0>+-0x10(%rbp)
+;   movq %rdi, %rax
+;   movq %rsi, %r10
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   return_call_unknown %r10 (32) tmp=%r11 %rdi=%rdi %rsi=%rsi %rdx=%rdx %rcx=%rcx %r8=%r8 %r9=%r9 %rax=%rax
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+;   movq %rsp, %rbp
+;   movq 0x20(%rsp), %r11
+;   movq %r11, (%rsp)
+;   movq 0x28(%rsp), %r11
+;   movq %r11, 8(%rsp)
+; block1: ; offset 0x1e
+;   movq %rdi, 0x10(%rbp)
+;   movq %rdi, 0x18(%rbp)
+;   movq %rdi, 0x20(%rbp)
+;   movq %rdi, %rax
+;   movq %rsi, %r10
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   movq %rbp, %rsp
+;   popq %rbp
+;   jmpq *%r10
+
+function %systemv_calls_tail(i64) -> i64 system_v {
+    fn0 = %callee10(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64 tail
+block0(v0: i64):
+    v1 = call fn0(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+    return v1
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+; block0:
+;   movq %rdi, (%rsp)
+;   movq %rdi, 8(%rsp)
+;   movq %rdi, 0x10(%rsp)
+;   load_ext_name %callee10+0, %r10
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   call    *%r10
+;   addq $0x20, %rsp
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+;   subq $0x20, %rsp
+; block1: ; offset 0x8
+;   movq %rdi, (%rsp)
+;   movq %rdi, 8(%rsp)
+;   movq %rdi, 0x10(%rsp)
+;   movabsq $0, %r10 ; reloc_external Abs8 %callee10 0
+;   movq %rdi, %rax
+;   movq %rax, %rcx
+;   movq %rax, %rdx
+;   movq %rax, %rsi
+;   movq %rax, %r8
+;   movq %rax, %r9
+;   callq *%r10
+;   subq $0x20, %rsp
+;   addq $0x20, %rsp
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+

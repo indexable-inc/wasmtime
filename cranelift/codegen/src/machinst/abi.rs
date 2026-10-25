@@ -600,6 +600,17 @@ pub trait ABIMachineSpec {
         is_exception: bool,
     ) -> PRegSet;
 
+    /// As `get_regs_clobbered_by_call`, for a backend whose clobber set also
+    /// depends on the shared flags (x64 `tail_arg_regs = wide_trade`). Call
+    /// sites lowered from CLIF use this one.
+    fn get_regs_clobbered_by_call_with_flags(
+        _flags: &settings::Flags,
+        call_conv_of_callee: isa::CallConv,
+        is_exception: bool,
+    ) -> PRegSet {
+        Self::get_regs_clobbered_by_call(call_conv_of_callee, is_exception)
+    }
+
     /// Get the needed extension mode, given the mode attached to the argument
     /// in the signature and the calling convention. The input (the attribute in
     /// the signature) specifies what extension type should be done *if* the ABI
@@ -2149,8 +2160,11 @@ impl<M: ABIMachineSpec> Callee<M> {
         let clobbers = {
             // Get clobbers: all caller-saves. These may include return value
             // regs, which we will remove from the clobber set below.
-            let mut clobbers =
-                <M>::get_regs_clobbered_by_call(callee_conv, try_call_info.is_some());
+            let mut clobbers = <M>::get_regs_clobbered_by_call_with_flags(
+                &self.flags,
+                callee_conv,
+                try_call_info.is_some(),
+            );
 
             // Remove retval regs from clobbers.
             for def in &defs {

@@ -8,6 +8,7 @@ use core::str::FromStr;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use std::path::Path;
 pub use wasmparser::WasmFeatures;
+pub use wasmtime_environ::IxWasmCc;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use wasmtime_environ::FlagValue;
 use wasmtime_environ::{ConfigTunables, OperatorCost, OperatorCostStrategy, TripleExt, Tunables};
@@ -1041,6 +1042,35 @@ impl Config {
     #[cfg(feature = "ix-unsafe-bench")]
     pub unsafe fn ix_unsafe_ci_nocheck(&mut self, level: u32) -> &mut Self {
         self.tunables.ix_unsafe_ci_nocheck = Some(level);
+        self
+    }
+
+    /// ix fork: integer argument registers of calls between wasm functions.
+    ///
+    /// Wasm functions call each other with Cranelift's `tail` calling
+    /// convention, which passes the callee and caller vmctx pointers and then
+    /// only 4 wasm integer parameters in registers (x86_64 rdi..r9, aarch64
+    /// x2..x7); the rest go on the stack. [`IxWasmCc::Wide`] adds rax on
+    /// x86_64 (5 in registers) and x9..x15 on aarch64 (11), all registers that
+    /// are already caller-saved. [`IxWasmCc::WideTrade`] also adds r12 and r13 on
+    /// x86_64 (7), which then stop being callee-saved for wasm functions.
+    ///
+    /// Only calls into wasm-convention code change: wasm functions, and the
+    /// Cranelift-compiled trampolines between wasm and the host and builtins,
+    /// all compiled by this engine. The host ABI, traps, unwinding, tail calls
+    /// and the stack limit check are unchanged. Every module in one engine uses
+    /// the same setting (modules call each other's functions directly), so it
+    /// is part of the compiled artifact's compatibility check.
+    ///
+    /// # Errors
+    ///
+    /// Building the engine fails for any value other than
+    /// [`IxWasmCc::Standard`] unless the compiler is Cranelift and the target is
+    /// x86_64 or aarch64.
+    ///
+    /// The default is [`IxWasmCc::Standard`].
+    pub fn ix_wasm_cc(&mut self, cc: IxWasmCc) -> &mut Self {
+        self.tunables.ix_wasm_cc = Some(cc);
         self
     }
 
@@ -3262,6 +3292,27 @@ impl Config {
             compiler.clif_dir(path)?;
         }
 
+        // ix fork: the wasm-to-wasm argument registers (`Config::ix_wasm_cc`).
+        // Always set, so a raw `cranelift_flag_set` cannot disagree with the
+        // tunables that the artifact check compares.
+        if tunables.ix_wasm_cc != IxWasmCc::Standard {
+            if !matches!(self.compiler_config_mut().strategy, Some(Strategy::Cranelift)) {
+                bail!("ix_wasm_cc requires the Cranelift compiler");
+            }
+            if !matches!(
+                target.architecture,
+                target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_)
+            ) {
+                bail!("ix_wasm_cc is only supported on x86_64 and aarch64");
+            }
+        }
+        if matches!(self.compiler_config_mut().strategy, Some(Strategy::Cranelift)) {
+            self.compiler_config_mut().settings.insert(
+                "tail_arg_regs".into(),
+                (tunables.ix_wasm_cc.cranelift_flag().into(), UserSpecified::No),
+            );
+        }
+
         // If probestack is enabled for a target, Wasmtime will always use the
         // inline strategy which doesn't require us to define a `__probestack`
         // function or similar.
@@ -5403,6 +5454,11 @@ impl Engine {
     /// Returns the configured [`Config::debug_info`] value.
     pub fn get_debug_info(&self) -> bool {
         self.tunables().debug_native
+    }
+
+    /// Returns the configured [`Config::ix_wasm_cc`] value.
+    pub fn get_ix_wasm_cc(&self) -> IxWasmCc {
+        self.tunables().ix_wasm_cc
     }
 
     /// Returns the configured [`Config::guest_debug`] value.

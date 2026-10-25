@@ -122,7 +122,7 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             // In the SystemV and WindowsFastcall ABIs, the return area pointer is the first
             // argument. For the Tail and Winch ABIs we do the same for simplicity sake.
             Some(ABIArg::reg(
-                get_intreg_for_arg(call_conv, 0, 0)
+                intreg_for_arg(call_conv, flags, 0, 0)
                     .unwrap()
                     .to_real_reg()
                     .unwrap(),
@@ -223,7 +223,7 @@ impl ABIMachineSpec for X64ABIMachineSpec {
                 && args_or_rets == ArgsOrRets::Args
                 && is_fastcall
             {
-                let pointer = match get_intreg_for_arg(call_conv, next_gpr, next_param_idx) {
+                let pointer = match intreg_for_arg(call_conv, flags, next_gpr, next_param_idx) {
                     Some(reg) => {
                         next_gpr += 1;
                         ABIArgSlot::Reg {
@@ -316,7 +316,9 @@ impl ABIMachineSpec for X64ABIMachineSpec {
                 let intreg = *rc == RegClass::Int;
                 let nextreg = if intreg {
                     match args_or_rets {
-                        ArgsOrRets::Args => get_intreg_for_arg(call_conv, next_gpr, next_param_idx),
+                        ArgsOrRets::Args => {
+                            intreg_for_arg(call_conv, flags, next_gpr, next_param_idx)
+                        }
                         ArgsOrRets::Rets => {
                             get_intreg_for_retval(call_conv, flags, next_gpr, last_slot)
                         }
@@ -903,6 +905,22 @@ impl ABIMachineSpec for X64ABIMachineSpec {
         }
     }
 
+    fn get_regs_clobbered_by_call_with_flags(
+        flags: &settings::Flags,
+        call_conv_of_callee: isa::CallConv,
+        is_exception: bool,
+    ) -> PRegSet {
+        let mut clobbers = Self::get_regs_clobbered_by_call(call_conv_of_callee, is_exception);
+        if call_conv_of_callee == isa::CallConv::Tail
+            && flags.tail_arg_regs() == settings::TailArgRegs::WideTrade
+        {
+            // `wide_trade`: r12 and r13 carry arguments, so they are caller-saved.
+            clobbers.add(regs::gpr_preg(asm::gpr::enc::R12));
+            clobbers.add(regs::gpr_preg(asm::gpr::enc::R13));
+        }
+        clobbers
+    }
+
     fn get_ext_mode(
         _call_conv: isa::CallConv,
         specified: ir::ArgumentExtension,
@@ -929,10 +947,18 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             // The `winch` calling convention doesn't have any callee-save
             // registers.
             CallConv::Winch => vec![],
-            CallConv::Fast | CallConv::SystemV | CallConv::Tail => regs
+            CallConv::Fast | CallConv::SystemV => regs
                 .iter()
                 .cloned()
                 .filter(|r| is_callee_save_systemv(r.to_reg(), flags.enable_pinned_reg()))
+                .collect(),
+            CallConv::Tail => regs
+                .iter()
+                .cloned()
+                .filter(|r| {
+                    is_callee_save_systemv(r.to_reg(), flags.enable_pinned_reg())
+                        && !tail_trades_callee_save(flags, r.to_reg())
+                })
                 .collect(),
             CallConv::WindowsFastcall => regs
                 .iter()
@@ -1038,6 +1064,42 @@ fn get_intreg_for_arg(call_conv: CallConv, idx: usize, arg_idx: usize) -> Option
         (3, true) => Some(regs::r9()),
         _ => None,
     }
+}
+
+/// The integer argument register `idx` of `call_conv`, including the extra `tail`
+/// registers that the `tail_arg_regs` setting adds after r9.
+///
+/// The extras must not be any fixed register the `tail` ABI code uses around a call:
+/// r10 (stack-limit check in the prologue, `return_call_indirect` target), r11
+/// (prologue/tail-call/probestack temp, retval temp) and r15 (pinned register).
+/// rax is free: Wasmtime always uses the inline probestack, which does not touch it.
+fn intreg_for_arg(
+    call_conv: CallConv,
+    flags: &settings::Flags,
+    idx: usize,
+    arg_idx: usize,
+) -> Option<Reg> {
+    if let Some(r) = get_intreg_for_arg(call_conv, idx, arg_idx) {
+        return Some(r);
+    }
+    if call_conv != CallConv::Tail {
+        return None;
+    }
+    match (flags.tail_arg_regs(), idx) {
+        (settings::TailArgRegs::Wide | settings::TailArgRegs::WideTrade, 6) => Some(regs::rax()),
+        (settings::TailArgRegs::WideTrade, 7) => Some(regs::r12()),
+        (settings::TailArgRegs::WideTrade, 8) => Some(regs::r13()),
+        _ => None,
+    }
+}
+
+/// Under `tail_arg_regs = wide_trade`, r12 and r13 are argument registers of
+/// `tail`, so a `tail` function does not preserve them.
+fn tail_trades_callee_save(flags: &settings::Flags, r: RealReg) -> bool {
+    use asm::gpr::enc::*;
+    flags.tail_arg_regs() == settings::TailArgRegs::WideTrade
+        && r.class() == RegClass::Int
+        && matches!(r.hw_enc(), R12 | R13)
 }
 
 fn get_fltreg_for_arg(call_conv: CallConv, idx: usize, arg_idx: usize) -> Option<Reg> {

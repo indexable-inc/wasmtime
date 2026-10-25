@@ -472,6 +472,11 @@ information about this check\
             // generated code.
             "enable_llvm_abi_extensions" => *value == FlagValue::Bool(false),
             "enable_pinned_reg" => *value == FlagValue::Bool(false),
+            // ix fork: the wasm-to-wasm argument registers, exactly as
+            // `Config::ix_wasm_cc` asked for (also checked via the tunables).
+            "tail_arg_regs" => {
+                *value == FlagValue::Enum(self.tunables().ix_wasm_cc.cranelift_flag())
+            }
             "use_colocated_libcalls" => *value == FlagValue::Bool(false),
             "use_pinned_reg_as_heap_base" => *value == FlagValue::Bool(false),
 

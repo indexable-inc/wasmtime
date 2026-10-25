@@ -49,6 +49,18 @@ impl X64Backend {
                 "the x32 ABI is not supported".to_owned(),
             ));
         }
+        // The outlined probestack takes the frame size in rax in the prologue,
+        // before the body has read its arguments; under a wide `tail_arg_regs`
+        // rax carries a `tail` argument.
+        if flags.tail_arg_regs() != crate::settings::TailArgRegs::Standard
+            && flags.enable_probestack()
+            && flags.probestack_strategy() == crate::settings::ProbestackStrategy::Outline
+        {
+            return Err(CodegenError::Unsupported(
+                "tail_arg_regs other than `standard` needs probestack_strategy=inline on x86-64"
+                    .to_owned(),
+            ));
+        }
 
         Ok(Self {
             triple,
