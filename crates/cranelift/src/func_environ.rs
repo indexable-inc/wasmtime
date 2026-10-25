@@ -4,8 +4,8 @@ pub(crate) mod stack_switching;
 use crate::alias_region::{AliasRegions, GcAccess};
 use crate::compiler::Compiler;
 use crate::translate::{
-    FuncTranslationStacks, Heap, HeapData, MemoryKind, StructFieldsVec, TableData, TableSize,
-    TargetEnvironment, VmctxLoadChain,
+    FuncTranslationStacks, Heap, HeapData, LoadPcc, MemoryKind, StructFieldsVec, TableData,
+    TableSize, TargetEnvironment, VmctxLoadChain,
 };
 use crate::trap::TranslateTrap;
 use crate::{
@@ -198,6 +198,11 @@ pub struct FuncEnvironment<'module_environment> {
     /// Heaps implementing WebAssembly linear memories.
     heaps: PrimaryMap<Heap, HeapData>,
 
+    /// Proof-carrying code: per-function memory types and annotated
+    /// base/bound load chains for every linear memory, built eagerly in
+    /// `before_translate_function` (see `pcc_init`). `None` when PCC is off.
+    pcc: Option<PccState>,
+
     /// When translating a fused sync-to-sync adapter, the explicit stack slot
     /// holding the `VMDeferredThread` pushed by the inline `enter-sync-call`
     /// lowering, shared with the matching inline `exit-sync-call`. `None`
@@ -326,6 +331,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             gc_heap: None,
 
             heaps: PrimaryMap::default(),
+            pcc: None,
             fact_sync_call_slot: None,
             builtin_functions,
             offsets,
@@ -1771,13 +1777,181 @@ impl FuncEnvironment<'_> {
 
     fn make_heap(&mut self, func: &mut ir::Function, index: MemoryIndex) -> Heap {
         let memory = self.module.memories[index];
+        if let Some(m) = self.pcc.as_ref().and_then(|p| p.memories.get(&index)) {
+            let m = m.clone();
+            return self.heaps.push(HeapData {
+                base: m.base,
+                bound: m.bound,
+                kind: MemoryKind::LinearMemory,
+                memory,
+                pcc_memory_type: Some(m.memory_type),
+                pcc_bound_gv: Some(m.bound_gv),
+            });
+        }
         let (base, bound) = self.make_heap_base_bound(func, index);
         self.heaps.push(HeapData {
             base,
             bound,
             kind: MemoryKind::LinearMemory,
             memory,
+            pcc_memory_type: None,
+            pcc_bound_gv: None,
         })
+    }
+
+    /// Proof-carrying code: build the memory types this function's facts
+    /// refer to, and the fact on the `vmctx` parameter.
+    ///
+    /// Everything is built eagerly and in a fixed order (the `vmctx` struct
+    /// first, then each memory in index order) so that every function of a
+    /// module gets structurally identical memory types. The inliner relies on
+    /// this to merge an inlined callee's memory types with its caller's.
+    ///
+    /// The memory types are axioms the checker trusts:
+    ///
+    /// - `vmctx` points to a struct whose fields hold, for each memory, the
+    ///   base pointer and current length (owned memories) or a pointer to the
+    ///   `VMMemoryDefinition` (imported memories).
+    /// - a memory whose bounds checks are elided (the 4 GiB reservation plus
+    ///   guard configuration) is a `Memory { size: reservation + guard }`:
+    ///   any access within that many bytes of the base is in the sandbox,
+    ///   because the runtime reserves exactly that much address space.
+    /// - any other memory (explicit bounds checks) gets no facts yet; its
+    ///   accesses are not marked `checked`. Upstream's `DynamicMemory`
+    ///   proofs need the checker to follow the bound through x64's fused
+    ///   32-bit address arithmetic, which it cannot do yet.
+    ///
+    /// Shared memories and memory64 memories get no facts (their accesses are
+    /// not marked `checked`).
+    fn pcc_init(&mut self, func: &mut ir::Function) {
+        debug_assert!(self.isa.flags().enable_pcc());
+        let ptr_ty = self.pointer_type();
+        let ptr_bits = u16::try_from(ptr_ty.bits()).unwrap();
+        let vmctx_mt = func.create_memory_type(ir::MemoryTypeData::Struct {
+            size: 0,
+            fields: vec![],
+        });
+        let vmctx = func
+            .special_param(ir::ArgumentPurpose::VMContext)
+            .expect("missing vmctx parameter");
+        func.dfg.facts[vmctx] = Some(ir::Fact::Mem {
+            ty: vmctx_mt,
+            min_offset: 0,
+            max_offset: 0,
+            nullable: false,
+        });
+
+        let mut memories = std::collections::BTreeMap::new();
+        let host_page_size_log2 = self.target_config().page_size_align_log2;
+        for (index, memory) in self.module.memories.iter() {
+            let memory = *memory;
+            if memory.shared || memory.idx_type != IndexType::I32 {
+                continue;
+            }
+            let tunables = MemoryTunables::new(self.tunables, MemoryKind::LinearMemory);
+            // Memories with explicit bounds checks (no 4 GiB reservation plus
+            // guard, or no signal-based traps) are not proven yet: the
+            // checker cannot yet follow a `DynamicMemory` bound through the
+            // fused 32-bit address arithmetic x64 emits for them. Their
+            // accesses stay unchecked (strict mode will reject them).
+            if !memory.can_elide_bounds_check(&tunables, host_page_size_log2) {
+                continue;
+            }
+            let (mut base, mut bound) = self.make_heap_base_bound(func, index);
+            let bound_gv = bound.emit_global_canonical(func);
+            let data_mt = func.create_memory_type(ir::MemoryTypeData::Memory {
+                size: tunables
+                    .reservation()
+                    .checked_add(tunables.guard_size())
+                    .expect("memory reservation plus guard overflows"),
+            });
+            let base_pcc = LoadPcc::PointsTo(data_mt);
+            Self::pcc_annotate_chain(func, vmctx_mt, &mut base, base_pcc, ptr_bits);
+            Self::pcc_annotate_chain(
+                func,
+                vmctx_mt,
+                &mut bound,
+                LoadPcc::GlobalValue(bound_gv),
+                ptr_bits,
+            );
+            memories.insert(
+                index,
+                PccMemory {
+                    base,
+                    bound,
+                    memory_type: data_mt,
+                    bound_gv,
+                },
+            );
+        }
+        self.pcc = Some(PccState { memories });
+    }
+
+    /// Attach PCC facts to each load of `chain`, adding the fields they load
+    /// to the struct memory types, starting at `vmctx_mt`. Intermediate loads
+    /// (the `VMMemoryDefinition` pointer of an imported memory) point to a
+    /// struct memory type of their own; the last load gets `last`.
+    fn pcc_annotate_chain(
+        func: &mut ir::Function,
+        vmctx_mt: ir::MemoryType,
+        chain: &mut VmctxLoadChain,
+        last: LoadPcc,
+        ptr_bits: u16,
+    ) {
+        let mut cur = vmctx_mt;
+        let n = chain.loads_mut().len();
+        for (i, load) in chain.loads_mut().iter_mut().enumerate() {
+            let offset = u64::from(load.offset);
+            let pcc = if i + 1 == n {
+                last
+            } else {
+                // Reuse the pointee of an existing field at this offset, so
+                // the base and bound chains of an imported memory share
+                // their `VMMemoryDefinition` memory type.
+                let existing = match &func.memory_types[cur] {
+                    ir::MemoryTypeData::Struct { fields, .. } => fields
+                        .iter()
+                        .find(|f| f.offset == offset)
+                        .and_then(|f| match f.fact {
+                            Some(ir::Fact::Mem { ty, .. }) => Some(ty),
+                            _ => None,
+                        }),
+                    _ => unreachable!("vmctx memory types are structs"),
+                };
+                let pointee = existing.unwrap_or_else(|| {
+                    func.create_memory_type(ir::MemoryTypeData::Struct {
+                        size: 0,
+                        fields: vec![],
+                    })
+                });
+                LoadPcc::PointsTo(pointee)
+            };
+            let bits = u16::try_from(load.ty.bits()).unwrap();
+            let fact = pcc.fact(if load.ty.is_int() { bits } else { ptr_bits });
+            match &mut func.memory_types[cur] {
+                ir::MemoryTypeData::Struct { size, fields } => {
+                    if !fields.iter().any(|f| f.offset == offset) {
+                        fields.push(ir::MemoryTypeField {
+                            offset,
+                            ty: load.ty,
+                            // Generated code never stores to these fields;
+                            // only the runtime updates them.
+                            readonly: true,
+                            fact: Some(fact),
+                        });
+                        fields.sort_by_key(|f| f.offset);
+                        *size = (*size).max(offset + u64::from(load.ty.bytes()));
+                    }
+                }
+                _ => unreachable!("vmctx memory types are structs"),
+            }
+            load.pcc = Some(pcc);
+            if let LoadPcc::PointsTo(ty) = pcc {
+                if i + 1 != n {
+                    cur = ty;
+                }
+            }
+        }
     }
 
     fn make_heap_base_bound(
@@ -3012,6 +3186,10 @@ impl<'module_environment> TargetEnvironment for FuncEnvironment<'module_environm
 
     fn heap_access_spectre_mitigation(&self) -> bool {
         self.isa.flags().enable_heap_access_spectre_mitigation()
+    }
+
+    fn proof_carrying_code(&self) -> bool {
+        self.isa.flags().enable_pcc()
     }
 
     fn tunables(&self) -> &Tunables {
@@ -5739,6 +5917,10 @@ impl FuncEnvironment<'_> {
 
         self.update_state_slot_vmctx(builder);
 
+        if self.isa.flags().enable_pcc() {
+            self.pcc_init(builder.func);
+        }
+
         // Additionally we initialize `fuel_var` if it will get used.
         if self.tunables.consume_fuel {
             self.fuel_function_entry(builder);
@@ -7052,4 +7234,19 @@ impl CheckedEntity {
             CheckedEntity::Table { .. } => false,
         }
     }
+}
+
+/// Proof-carrying code state for one function; see `FuncEnvironment::pcc_init`.
+struct PccState {
+    memories: std::collections::BTreeMap<MemoryIndex, PccMemory>,
+}
+
+/// One linear memory's PCC memory type, symbolic bound, and fact-annotated
+/// base and bound load chains.
+#[derive(Clone)]
+struct PccMemory {
+    base: VmctxLoadChain,
+    bound: VmctxLoadChain,
+    memory_type: ir::MemoryType,
+    bound_gv: ir::GlobalValue,
 }

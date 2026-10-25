@@ -9,6 +9,7 @@
 //! compile with an error naming it.
 
 use crate::func_environ::FuncEnvironment;
+use crate::translate::TargetEnvironment;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I8, I8X16, I32X4, I64, I64X2};
 use cranelift_codegen::ir::{self, ConstantData, InstBuilder, MemFlagsData, Value};
@@ -95,13 +96,9 @@ pub(crate) fn translate(
     let result = match (arch, intrinsic) {
         // AES, x86 semantics.
         (Arch::X64, AesEnc) => Some(builder.ins().x86_aesenc(args[0], args[1])),
-        (Arch::X64, AesEncLast) => {
-            Some(builder.ins().x86_aesenclast(args[0], args[1]))
-        }
+        (Arch::X64, AesEncLast) => Some(builder.ins().x86_aesenclast(args[0], args[1])),
         (Arch::X64, AesDec) => Some(builder.ins().x86_aesdec(args[0], args[1])),
-        (Arch::X64, AesDecLast) => {
-            Some(builder.ins().x86_aesdeclast(args[0], args[1]))
-        }
+        (Arch::X64, AesDecLast) => Some(builder.ins().x86_aesdeclast(args[0], args[1])),
         (Arch::X64, AesImc) => Some(builder.ins().x86_aesimc(args[0])),
         // Arm: AESE/AESD xor the key first, x86 last. Use a zero key and xor
         // after; the backend folds that xor into the next round's AESE.
@@ -221,7 +218,11 @@ fn bitcast(builder: &mut FunctionBuilder, ty: ir::Type, x: Value) -> Value {
 }
 
 fn zero_vector(builder: &mut FunctionBuilder) -> Value {
-    let c = builder.func.dfg.constants.insert(ConstantData::from(&[0u8; 16][..]));
+    let c = builder
+        .func
+        .dfg
+        .constants
+        .insert(ConstantData::from(&[0u8; 16][..]));
     builder.ins().vconst(I8X16, c)
 }
 
@@ -233,7 +234,11 @@ fn shuffle32(builder: &mut FunctionBuilder, a: Value, b: Value, lanes: [u8; 4]) 
             bytes[i * 4 + j] = l * 4 + j as u8;
         }
     }
-    let mask = builder.func.dfg.immediates.push(ConstantData::from(&bytes[..]));
+    let mask = builder
+        .func
+        .dfg
+        .immediates
+        .push(ConstantData::from(&bytes[..]));
     builder.ins().shuffle(a, b, mask)
 }
 
@@ -250,7 +255,12 @@ fn clmul(builder: &mut FunctionBuilder, arch: Arch, a: Value, b: Value, hi: bool
 /// without a memory, emits nothing. An address at or past the memory's
 /// current length prefetches the memory's base instead, so the hint never
 /// touches anything outside this instance's memory and never traps.
-fn prefetch(builder: &mut FunctionBuilder, environ: &mut FuncEnvironment<'_>, addr: Value, hint: Value) {
+fn prefetch(
+    builder: &mut FunctionBuilder,
+    environ: &mut FuncEnvironment<'_>,
+    addr: Value,
+    hint: Value,
+) {
     let Some(hint) = iconst_value(builder, hint) else {
         return;
     };
@@ -258,7 +268,22 @@ fn prefetch(builder: &mut FunctionBuilder, environ: &mut FuncEnvironment<'_>, ad
         return;
     }
     let heap = environ.get_or_create_heap(builder.func, MemoryIndex::from_u32(0));
+    let pcc = environ.proof_carrying_code();
     let heap = &environ.heaps()[heap];
+    // Under PCC the prefetch's address is a checked access (see
+    // `mem_flags_pcc_checked_data`), so it needs facts. They are given for
+    // a 32-bit index into a static memory whose reservation plus guard
+    // covers every 32-bit offset; anywhere else the hint is dropped.
+    let pcc_mt = match heap.pcc_memory_type {
+        Some(mt) if pcc => match builder.func.memory_types[mt] {
+            ir::MemoryTypeData::Memory { size } if size > u64::from(u32::MAX) => Some(mt),
+            _ => None,
+        },
+        _ => None,
+    };
+    if pcc && (pcc_mt.is_none() || builder.func.dfg.value_type(addr) != ir::types::I32) {
+        return;
+    }
     let vmctx = builder
         .func
         .special_param(ir::ArgumentPurpose::VMContext)
@@ -274,8 +299,21 @@ fn prefetch(builder: &mut FunctionBuilder, environ: &mut FuncEnvironment<'_>, ad
         builder.ins().uextend(I64, addr)
     };
     let inside = builder.ins().icmp(IntCC::UnsignedLessThan, addr, bound);
-    let p = builder.ins().iadd(base, addr);
-    let p = builder.ins().select(inside, p, base);
+    let in_mem = builder.ins().iadd(base, addr);
+    let p = builder.ins().select(inside, in_mem, base);
+    if let Some(mt) = pcc_mt {
+        use cranelift_codegen::ir::pcc::Fact;
+        let max = u64::from(u32::MAX);
+        builder.func.dfg.facts[addr] = Some(Fact::max_range_for_width_extended(32, 64));
+        for v in [in_mem, p] {
+            builder.func.dfg.facts[v] = Some(Fact::Mem {
+                ty: mt,
+                min_offset: 0,
+                max_offset: max,
+                nullable: false,
+            });
+        }
+    }
     builder.ins().ix_prefetch(p, (hint & 7) as u8);
 }
 
@@ -289,4 +327,3 @@ fn iconst_value(builder: &FunctionBuilder, v: Value) -> Option<i64> {
         _ => None,
     }
 }
-

@@ -3783,6 +3783,11 @@ fn prepare_addr(
     let mut flags = MemFlagsData::new();
     flags.set_endianness(ir::Endianness::Little);
 
+    if heap.pcc_memory_type.is_some() {
+        // Proof-carrying code is enabled; check this memory access.
+        flags.set_checked();
+    }
+
     // The access occurs to a per-memory disjoint category of abstract
     // state. This may allow alias analysis to merge redundant loads,
     // etc. when heap accesses occur interleaved with other (table,

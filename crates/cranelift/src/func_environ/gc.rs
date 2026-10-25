@@ -1754,6 +1754,9 @@ impl FuncEnvironment<'_> {
             bound: VmctxLoadChain::new(smallvec![store_ctx, bound]),
             memory,
             kind: MemoryKind::GcHeap,
+            // The GC heap is not covered by proof-carrying code.
+            pcc_memory_type: None,
+            pcc_bound_gv: None,
         });
         self.gc_heap = Some(heap);
         heap

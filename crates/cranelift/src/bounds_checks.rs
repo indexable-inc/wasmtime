@@ -29,6 +29,7 @@ use Reachability::*;
 use cranelift_codegen::{
     cursor::{Cursor, FuncCursor},
     ir::{self, InstBuilder, RelSourceLoc, condcodes::IntCC},
+    ir::{Expr, Fact},
 };
 use cranelift_frontend::FunctionBuilder;
 
@@ -154,6 +155,7 @@ pub fn bounds_check_and_compute_addr(
                 backwards_offset,
                 ir::types::I32,
                 env.pointer_type(),
+                false,
                 &mut builder.cursor(),
                 trap,
             );
@@ -174,10 +176,15 @@ fn bounds_check_field_access(
     trap: ir::TrapCode,
 ) -> Reachability<ir::Value> {
     let pointer_bit_width = u16::try_from(env.pointer_type().bits()).unwrap();
-
     let clif_memory_traps_enabled = env.clif_memory_traps_enabled();
     let spectre_mitigations_enabled =
         env.heap_access_spectre_mitigation() && clif_memory_traps_enabled;
+    // Proof-carrying code facts are emitted only for heaps that the
+    // environment gave a PCC memory type.
+    let pcc = heap.pcc_memory_type.is_some();
+    debug_assert!(!pcc || env.proof_carrying_code());
+    // The symbolic bound used in facts for dynamically-checked heaps.
+    let bound_gv = heap.pcc_bound_gv;
 
     let host_page_size_log2 = env.target_config().page_size_align_log2;
     let memory_tunables = heap.memory_tunables(env.tunables());
@@ -195,15 +202,24 @@ fn bounds_check_field_access(
     let offset_and_size = offset_plus_size(offset, access_size);
     let statically_in_bounds = statically_in_bounds(&builder.func, heap, index, offset_and_size);
 
+    // The PCC symbol that names this access's index. It is the Wasm-level
+    // index value, so every `uextend` of the same index (which the egraph may
+    // merge) carries the same `Def` and the merge is a no-op.
+    let sym = index;
     let index = cast_index_to_pointer_ty(
         index,
         heap.index_type(),
         env.pointer_type(),
+        heap.pcc_memory_type.is_some(),
         &mut builder.cursor(),
         trap,
     );
 
-    let oob_behavior = if spectre_mitigations_enabled {
+    // With PCC on, an explicit check that traps by branching is not provable
+    // (the checker tracks no control flow), so whenever a load from address
+    // zero traps, PCC uses the `select_spectre_guard` form: the address is
+    // selected to zero on out-of-bounds, which the checker proves.
+    let oob_behavior = if spectre_mitigations_enabled || (pcc && clif_memory_traps_enabled) {
         OobBehavior::ConditionallyLoadFromZero {
             select_spectre_guard: true,
         }
@@ -215,10 +231,55 @@ fn bounds_check_field_access(
         OobBehavior::ExplicitTrap
     };
 
-    let make_compare =
-        |builder: &mut FunctionBuilder, compare_kind: IntCC, lhs: ir::Value, rhs: ir::Value| {
-            builder.ins().icmp(compare_kind, lhs, rhs)
-        };
+    let make_compare = |builder: &mut FunctionBuilder,
+                        compare_kind: IntCC,
+                        lhs: ir::Value,
+                        lhs_off: Option<i64>,
+                        rhs: ir::Value,
+                        rhs_off: Option<i64>| {
+        let result = builder.ins().icmp(compare_kind, lhs, rhs);
+        if pcc {
+            // The pointer-width index defines the symbol `sym` (the Wasm
+            // index). (Upstream put the `Def` on the 32-bit Wasm index and
+            // gave the `uextend` a dynamic range of it, but x64 fuses the
+            // 32-bit def into the zero-extending instruction, so the 32-bit
+            // def never reaches VCode.)
+            builder.func.dfg.facts[index] = Some(Fact::Def { value: sym });
+
+            // Create a fact on the LHS that is a "trivial symbolic
+            // fact": v1 has range v1+LHS_off..=v1+LHS_off. (When the LHS is
+            // the index itself it keeps its `Def`.)
+            if lhs != index {
+                builder.func.dfg.facts[lhs] =
+                    Some(Fact::value_offset(pointer_bit_width, sym, lhs_off.unwrap()));
+            }
+            // If the RHS is a symbolic value (v1 or gv1), we can
+            // emit a Compare fact.
+            if let Some(rhs) = builder.func.dfg.facts[rhs]
+                .as_ref()
+                .and_then(|f| f.as_symbol())
+            {
+                builder.func.dfg.facts[result] = Some(Fact::Compare {
+                    kind: compare_kind,
+                    lhs: Expr::offset(&Expr::value(sym), lhs_off.unwrap()).unwrap(),
+                    rhs: Expr::offset(rhs, rhs_off.unwrap()).unwrap(),
+                });
+            }
+            // Likewise, if the RHS is a constant, we can emit a
+            // Compare fact.
+            if let Some(k) = builder.func.dfg.facts[rhs]
+                .as_ref()
+                .and_then(|f| f.as_const(pointer_bit_width))
+            {
+                builder.func.dfg.facts[result] = Some(Fact::Compare {
+                    kind: compare_kind,
+                    lhs: Expr::offset(&Expr::value(sym), lhs_off.unwrap()).unwrap(),
+                    rhs: Expr::constant((k as i64).checked_add(rhs_off.unwrap()).unwrap()),
+                });
+            }
+        }
+        result
+    };
 
     // We need to emit code that will trap (or compute an address that will trap
     // when accessed) if
@@ -310,18 +371,35 @@ fn bounds_check_field_access(
             env.pointer_type(),
             index,
             offset,
+            AddrPcc::static32(heap.pcc_memory_type, memory_reservation + memory_guard_size),
         ));
     }
 
     // Special case when the `index` is a constant and statically known to be
     // in-bounds on this memory, no bounds checks necessary.
     if statically_in_bounds {
+        // Under PCC the address is proven from the index's fact, so give the
+        // address an exact constant index: the `uextend` above only carries
+        // the full 32-bit range, which with a small guard does not prove the
+        // access (and without the egraph nothing narrows it).
+        let index = match (heap.pcc_memory_type, const_index(&builder.func, sym)) {
+            (Some(_), Some(k)) => {
+                let k_val = builder.ins().iconst(env.pointer_type(), k as i64);
+                builder.func.dfg.facts[k_val] = Some(Fact::constant(
+                    u16::try_from(env.pointer_type().bits()).unwrap(),
+                    k,
+                ));
+                k_val
+            }
+            _ => index,
+        };
         return Reachable(compute_addr(
             &mut builder.cursor(),
             heap,
             env.pointer_type(),
             index,
             offset,
+            AddrPcc::static32(heap.pcc_memory_type, memory_reservation + memory_guard_size),
         ));
     }
 
@@ -352,11 +430,17 @@ fn bounds_check_field_access(
         let adjusted_bound_value = builder
             .ins()
             .iconst(env.pointer_type(), adjusted_bound as i64);
+        if pcc {
+            builder.func.dfg.facts[adjusted_bound_value] =
+                Some(Fact::constant(pointer_bit_width, adjusted_bound));
+        }
         let oob = make_compare(
             builder,
             IntCC::UnsignedGreaterThan,
             index,
+            Some(0),
             adjusted_bound_value,
+            Some(0),
         );
         return Reachable(explicit_check_oob_condition_and_compute_addr(
             env,
@@ -364,7 +448,9 @@ fn bounds_check_field_access(
             heap,
             index,
             offset,
+            access_size,
             oob_behavior,
+            AddrPcc::static32(heap.pcc_memory_type, memory_reservation),
             oob,
             trap,
         ));
@@ -382,14 +468,23 @@ fn bounds_check_field_access(
     // largely only applicable for native platforms.
     if offset_and_size == 1 && !env.is_pulley() {
         let bound = get_dynamic_heap_bound(builder, env, heap);
-        let oob = make_compare(builder, IntCC::UnsignedGreaterThanOrEqual, index, bound);
+        let oob = make_compare(
+            builder,
+            IntCC::UnsignedGreaterThanOrEqual,
+            index,
+            Some(0),
+            bound,
+            Some(0),
+        );
         return Reachable(explicit_check_oob_condition_and_compute_addr(
             env,
             builder,
             heap,
             index,
             offset,
+            access_size,
             oob_behavior,
+            AddrPcc::dynamic(heap.pcc_memory_type, bound_gv),
             oob,
             trap,
         ));
@@ -422,14 +517,23 @@ fn bounds_check_field_access(
     // will all emit the same `index > bound` check, which we can GVN.
     if can_use_virtual_memory && offset_and_size <= memory_guard_size {
         let bound = get_dynamic_heap_bound(builder, env, heap);
-        let oob = make_compare(builder, IntCC::UnsignedGreaterThan, index, bound);
+        let oob = make_compare(
+            builder,
+            IntCC::UnsignedGreaterThan,
+            index,
+            Some(0),
+            bound,
+            Some(0),
+        );
         return Reachable(explicit_check_oob_condition_and_compute_addr(
             env,
             builder,
             heap,
             index,
             offset,
+            access_size,
             oob_behavior,
+            AddrPcc::dynamic(heap.pcc_memory_type, bound_gv),
             oob,
             trap,
         ));
@@ -446,15 +550,35 @@ fn bounds_check_field_access(
         let bound = get_dynamic_heap_bound(builder, env, heap);
         let adjustment = offset_and_size as i64;
         let adjustment_value = builder.ins().iconst(env.pointer_type(), adjustment);
+        if pcc {
+            builder.func.dfg.facts[adjustment_value] =
+                Some(Fact::constant(pointer_bit_width, offset_and_size));
+        }
         let adjusted_bound = builder.ins().isub(bound, adjustment_value);
-        let oob = make_compare(builder, IntCC::UnsignedGreaterThan, index, adjusted_bound);
+        if let Some(bound_gv) = bound_gv.filter(|_| pcc) {
+            builder.func.dfg.facts[adjusted_bound] = Some(Fact::global_value_offset(
+                pointer_bit_width,
+                bound_gv,
+                -adjustment,
+            ));
+        }
+        let oob = make_compare(
+            builder,
+            IntCC::UnsignedGreaterThan,
+            index,
+            Some(0),
+            adjusted_bound,
+            Some(adjustment),
+        );
         return Reachable(explicit_check_oob_condition_and_compute_addr(
             env,
             builder,
             heap,
             index,
             offset,
+            access_size,
             oob_behavior,
+            AddrPcc::dynamic(heap.pcc_memory_type, bound_gv),
             oob,
             trap,
         ));
@@ -470,16 +594,36 @@ fn bounds_check_field_access(
         // Explicit cast from u64 to i64: we just want the raw
         // bits, and iconst takes an `Imm64`.
         .iconst(env.pointer_type(), offset_and_size as i64);
+    if pcc {
+        builder.func.dfg.facts[access_size_val] =
+            Some(Fact::constant(pointer_bit_width, offset_and_size));
+    }
     let adjusted_index = env.uadd_overflow_trap(builder, index, access_size_val, trap);
+    if pcc {
+        builder.func.dfg.facts[adjusted_index] = Some(Fact::value_offset(
+            pointer_bit_width,
+            sym,
+            i64::try_from(offset_and_size).unwrap(),
+        ));
+    }
     let bound = get_dynamic_heap_bound(builder, env, heap);
-    let oob = make_compare(builder, IntCC::UnsignedGreaterThan, adjusted_index, bound);
+    let oob = make_compare(
+        builder,
+        IntCC::UnsignedGreaterThan,
+        adjusted_index,
+        i64::try_from(offset_and_size).ok(),
+        bound,
+        Some(0),
+    );
     Reachable(explicit_check_oob_condition_and_compute_addr(
         env,
         builder,
         heap,
         index,
         offset,
+        access_size,
         oob_behavior,
+        AddrPcc::dynamic(heap.pcc_memory_type, bound_gv),
         oob,
         trap,
     ))
@@ -497,12 +641,15 @@ fn get_dynamic_heap_bound(
     env: &mut FuncEnvironment<'_>,
     heap: &HeapData,
 ) -> ir::Value {
+    let enable_pcc = heap.pcc_memory_type.is_some();
     match heap.memory.static_heap_size() {
         // The heap has a constant size, no need to actually load the
-        // bound.
-        Some(max_size) => builder.ins().iconst(env.pointer_type(), max_size as i64),
+        // bound. This is disabled for PCC: the fact on the bound names the
+        // symbolic bound global value, which an `iconst` cannot prove.
+        Some(max_size) if !enable_pcc => builder.ins().iconst(env.pointer_type(), max_size as i64),
 
-        // Emit the load chain that computes the heap bound.
+        // Emit the load chain that computes the heap bound. With PCC on, the
+        // last load of the chain carries a fact naming the bound.
         _ => {
             let vmctx = vmctx(&mut builder.cursor());
             heap.bound.emit(&mut builder.cursor(), vmctx)
@@ -514,6 +661,7 @@ fn cast_index_to_pointer_ty(
     index: ir::Value,
     index_ty: ir::Type,
     pointer_ty: ir::Type,
+    pcc: bool,
     pos: &mut FuncCursor,
     trap: ir::TrapCode,
 ) -> ir::Value {
@@ -526,7 +674,7 @@ fn cast_index_to_pointer_ty(
     // larger than 2**32 then that's guaranteed to be out-of-bounds, otherwise we
     // `ireduce` the index.
     //
-    // Also note that at this time this branch doesn't support the
+    // Also note that at this time this branch doesn't support pcc nor the
     // value-label-ranges of the below path.
     //
     // Finally, note that the returned `low_bits` here are still subject to an
@@ -546,6 +694,14 @@ fn cast_index_to_pointer_ty(
     // Convert `index` to `addr_ty`.
     let extended_index = pos.ins().uextend(pointer_ty, index);
 
+    // Add a range fact on the extended value.
+    if pcc {
+        pos.func.dfg.facts[extended_index] = Some(Fact::max_range_for_width_extended(
+            u16::try_from(index_ty.bits()).unwrap(),
+            u16::try_from(pointer_ty.bits()).unwrap(),
+        ));
+    }
+
     // Add debug value-label alias so that debuginfo can name the extended
     // value as the address
     let loc = pos.srcloc();
@@ -556,6 +712,28 @@ fn cast_index_to_pointer_ty(
         .add_value_label_alias(extended_index, loc, index);
 
     extended_index
+}
+
+/// Which facts do we want to emit for proof-carrying code, if any, on
+/// address computations?
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AddrPcc {
+    /// A 32-bit static memory with the given size.
+    Static32(ir::MemoryType, u64),
+    /// Dynamic bounds-check, with actual memory size (the `GlobalValue`)
+    /// expressed symbolically.
+    Dynamic(ir::MemoryType, ir::GlobalValue),
+}
+impl AddrPcc {
+    fn static32(memory_type: Option<ir::MemoryType>, size: u64) -> Option<Self> {
+        memory_type.map(|ty| AddrPcc::Static32(ty, size))
+    }
+    fn dynamic(
+        memory_type: Option<ir::MemoryType>,
+        bound: Option<ir::GlobalValue>,
+    ) -> Option<Self> {
+        Some(AddrPcc::Dynamic(memory_type?, bound?))
+    }
 }
 
 /// What to do on out-of-bounds for the
@@ -582,7 +760,10 @@ fn explicit_check_oob_condition_and_compute_addr(
     heap: &HeapData,
     index: ir::Value,
     offset: u32,
+    access_size: u8,
     oob_behavior: OobBehavior,
+    // Whether we're emitting PCC facts.
+    pcc: Option<AddrPcc>,
     // The `i8` boolean value that is non-zero when the heap access is out of
     // bounds (and therefore we should trap) and is zero when the heap access is
     // in bounds (and therefore we can proceed).
@@ -594,7 +775,7 @@ fn explicit_check_oob_condition_and_compute_addr(
     }
     let addr_ty = env.pointer_type();
 
-    let mut addr = compute_addr(&mut builder.cursor(), heap, addr_ty, index, offset);
+    let mut addr = compute_addr(&mut builder.cursor(), heap, addr_ty, index, offset, pcc);
 
     if let OobBehavior::ConditionallyLoadFromZero {
         select_spectre_guard,
@@ -603,7 +784,9 @@ fn explicit_check_oob_condition_and_compute_addr(
         // These mitigations rely on trapping when loading from NULL so
         // CLIF memory instruction traps must be allowed for this to be
         // generated.
-        assert!(env.load_from_zero_allowed());
+        // (PCC also uses this form whenever memory traps are on; see
+        // `bounds_check_field_access`.)
+        assert!(env.load_from_zero_allowed() || (pcc.is_some() && env.clif_memory_traps_enabled()));
         let null = builder.ins().iconst(addr_ty, 0);
         addr = if select_spectre_guard {
             builder
@@ -612,6 +795,37 @@ fn explicit_check_oob_condition_and_compute_addr(
         } else {
             builder.ins().select(oob_condition, null, addr)
         };
+
+        match pcc {
+            None => {}
+            Some(AddrPcc::Static32(ty, size)) => {
+                builder.func.dfg.facts[null] =
+                    Some(Fact::constant(u16::try_from(addr_ty.bits()).unwrap(), 0));
+                builder.func.dfg.facts[addr] = Some(Fact::Mem {
+                    ty,
+                    min_offset: 0,
+                    max_offset: size.checked_sub(u64::from(access_size)).unwrap(),
+                    nullable: true,
+                });
+            }
+            Some(AddrPcc::Dynamic(ty, gv)) => {
+                builder.func.dfg.facts[null] =
+                    Some(Fact::constant(u16::try_from(addr_ty.bits()).unwrap(), 0));
+                builder.func.dfg.facts[addr] = Some(Fact::DynamicMem {
+                    ty,
+                    min: Expr::constant(0),
+                    max: Expr::offset(
+                        &Expr::global_value(gv),
+                        i64::try_from(heap.memory_tunables(env.tunables()).guard_size())
+                            .unwrap()
+                            .checked_sub(i64::from(access_size))
+                            .unwrap(),
+                    )
+                    .unwrap(),
+                    nullable: true,
+                });
+            }
+        }
     }
 
     addr
@@ -637,12 +851,57 @@ pub fn compute_addr(
     addr_ty: ir::Type,
     index: ir::Value,
     offset: u32,
+    pcc: Option<AddrPcc>,
 ) -> ir::Value {
     debug_assert_eq!(pos.func.dfg.value_type(index), addr_ty);
 
     let vmctx = vmctx(pos);
     let heap_base = heap.base.emit(pos, vmctx);
+
+    match pcc {
+        None => {}
+        Some(AddrPcc::Static32(ty, _size)) => {
+            pos.func.dfg.facts[heap_base] = Some(Fact::Mem {
+                ty,
+                min_offset: 0,
+                max_offset: 0,
+                nullable: false,
+            });
+        }
+        Some(AddrPcc::Dynamic(ty, _limit)) => {
+            pos.func.dfg.facts[heap_base] = Some(Fact::dynamic_base_ptr(ty));
+        }
+    }
+
     let base_and_index = pos.ins().iadd(heap_base, index);
+
+    // The index's numeric range: exact for a constant index, the full 32-bit
+    // range otherwise.
+    let (idx_min, idx_max) = match pos.func.dfg.facts[index] {
+        Some(Fact::Range { min, max, .. }) => (min, max),
+        _ => (0, u64::from(u32::MAX)),
+    };
+
+    match pcc {
+        None => {}
+        Some(AddrPcc::Static32(ty, _) | AddrPcc::Dynamic(ty, _)) => {
+            if let Some(idx) = pos.func.dfg.facts[index].as_ref().and_then(|f| f.symbol()) {
+                pos.func.dfg.facts[base_and_index] = Some(Fact::DynamicMem {
+                    ty,
+                    min: idx.clone(),
+                    max: idx,
+                    nullable: false,
+                });
+            } else {
+                pos.func.dfg.facts[base_and_index] = Some(Fact::Mem {
+                    ty,
+                    min_offset: idx_min,
+                    max_offset: idx_max,
+                    nullable: false,
+                });
+            }
+        }
+    }
 
     if offset == 0 {
         base_and_index
@@ -652,7 +911,44 @@ pub fn compute_addr(
         // potentially are letting speculative execution read the whole first
         // 4GiB of memory.
         let offset_val = pos.ins().iconst(addr_ty, i64::from(offset));
-        pos.ins().iadd(base_and_index, offset_val)
+
+        if pcc.is_some() {
+            pos.func.dfg.facts[offset_val] = Some(Fact::constant(
+                u16::try_from(addr_ty.bits()).unwrap(),
+                u64::from(offset),
+            ));
+        }
+
+        let result = pos.ins().iadd(base_and_index, offset_val);
+
+        match pcc {
+            None => {}
+            Some(AddrPcc::Static32(ty, _) | AddrPcc::Dynamic(ty, _)) => {
+                if let Some(idx) = pos.func.dfg.facts[index].as_ref().and_then(|f| f.symbol()) {
+                    pos.func.dfg.facts[result] = Some(Fact::DynamicMem {
+                        ty,
+                        min: idx.clone(),
+                        // Safety: adding an offset to an expression with
+                        // zero offset -- add cannot wrap, so `unwrap()`
+                        // cannot fail.
+                        max: Expr::offset(&idx, i64::from(offset)).unwrap(),
+                        nullable: false,
+                    });
+                } else {
+                    pos.func.dfg.facts[result] = Some(Fact::Mem {
+                        ty,
+                        min_offset: idx_min + u64::from(offset),
+                        // Safety: can't overflow -- two u32s summed in a
+                        // 64-bit add. TODO: when memory64 is supported here,
+                        // `u32::MAX` is no longer true, and we'll need to
+                        // handle overflow here.
+                        max_offset: idx_max + u64::from(offset),
+                        nullable: false,
+                    });
+                }
+            }
+        }
+        result
     }
 }
 
@@ -660,6 +956,21 @@ pub fn compute_addr(
 fn offset_plus_size(offset: u32, size: u8) -> u64 {
     // Cannot overflow because we are widening to `u64`.
     offset as u64 + size as u64
+}
+
+/// The zero-extended value of `index` when it is an `iconst`.
+fn const_index(func: &ir::Function, index: ir::Value) -> Option<u64> {
+    let inst = func.dfg.value_def(index).inst()?;
+    match func.dfg.insts[inst] {
+        ir::InstructionData::UnaryImm {
+            opcode: ir::Opcode::Iconst,
+            imm,
+        } => {
+            let ty = func.dfg.value_type(index);
+            Some(imm.zero_extend_from_width(ty.bits()).bits().cast_unsigned())
+        }
+        _ => None,
+    }
 }
 
 /// Returns whether `index` is statically in-bounds with respect to this

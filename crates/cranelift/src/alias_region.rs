@@ -558,6 +558,7 @@ impl<'a, Offsets> Field<'a, Offsets> {
             offset: self.offset,
             flags,
             ty: self.ty,
+            pcc: None,
         }
     }
 
@@ -1373,6 +1374,7 @@ where
             offset,
             flags: base_flags.with_alias_region(Some(region)),
             ty: self.pointer_type,
+            pcc: None,
         }
     }
 
@@ -1403,6 +1405,7 @@ where
             offset,
             flags: ir::MemFlagsData::trusted().with_alias_region(Some(region)),
             ty: self.pointer_type,
+            pcc: None,
         }
     }
 
