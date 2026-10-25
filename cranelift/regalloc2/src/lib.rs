@@ -1715,6 +1715,7 @@ pub fn run_with_ctx<'a, F: Function>(
             options.verbose_log,
             options.validate_ssa,
             options.max_splits_per_spillset,
+            options.split_spill_bundles,
         )?,
         Algorithm::Fastalloc => {
             ctx.output = fastalloc::run(func, env, options.verbose_log, options.validate_ssa)?
@@ -1748,6 +1749,12 @@ pub struct RegallocOptions {
     /// default (2). Each split costs time linear in the bundle, so the
     /// total stays O(limit * function size).
     pub max_splits_per_spillset: u8,
+
+    /// When a spilled bundle does not fit in a register as a whole, cut it
+    /// at calls (and, failing that, at block boundaries) and give each
+    /// piece a register when that saves reloads. No eviction; the work is
+    /// bounded linearly in the function size.
+    pub split_spill_bundles: bool,
 }
 
 pub(crate) trait VecExt<T> {

@@ -57,6 +57,17 @@ pub(crate) fn define() -> SettingGroup {
         0,
     );
 
+    settings.add_bool(
+        "regalloc_split_spills",
+        "Piecewise second-chance register allocation of spilled ranges.",
+        r#"
+            When a spilled range does not fit in one register as a whole, cut it at
+            calls (and then at block boundaries) and give each piece a register when
+            that saves reloads. No eviction; work stays linear in the function size.
+        "#,
+        false,
+    );
+
     settings.add_enum(
         "opt_level",
         "Optimization level for generated code.",

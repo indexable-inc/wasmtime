@@ -24,6 +24,7 @@ pub struct TestCase {
     annotate: bool,
     check_ssa: bool,
     max_splits: u8,
+    split_spills: bool,
 }
 
 impl Arbitrary<'_> for TestCase {
@@ -33,11 +34,13 @@ impl Arbitrary<'_> for TestCase {
         let check_ssa = bool::arbitrary(u)?;
         // 0 is the default (2); also cover larger split budgets.
         let max_splits = *u.choose(&[0u8, 1, 2, 4, 8, 16, 32])?;
+        let split_spills = bool::arbitrary(u)?;
         Ok(TestCase {
             func,
             annotate,
             check_ssa,
             max_splits,
+            split_spills,
         })
     }
 }
@@ -54,6 +57,7 @@ pub fn check(t: TestCase) {
         annotate,
         check_ssa,
         max_splits,
+        split_spills,
     } = &t;
     log::trace!("func:\n{func:?}");
 
@@ -71,13 +75,21 @@ pub fn check(t: TestCase) {
             *annotate,
             *check_ssa,
             *max_splits,
+            *split_spills,
         )
             .expect("regalloc did not succeed");
 
         let mut checker = checker::Checker::new(func, &env);
         checker.prepare(&ctx.borrow().output);
         checker.run().expect("checker failed");
+        PIECES.with(|p| p.set(p.get() + ctx.borrow().output.stats.spill_pieces_placed as u64));
+        ABSORBED.with(|p| p.set(p.get() + ctx.borrow().output.stats.spill_uses_absorbed as u64));
     });
+}
+
+std::thread_local! {
+    static PIECES: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
+    static ABSORBED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 #[test]
@@ -108,5 +120,24 @@ fn long() {
         Ok(())
     })
     .budget_ms(ms);
-    std::println!("ion checker: {} functions", cases.get());
+    std::println!(
+        "ion checker: {} functions, {} spill pieces placed, {} uses absorbed",
+        cases.get(),
+        PIECES.with(|p| p.get()),
+        ABSORBED.with(|p| p.get())
+    );
+}
+
+/// Re-run one failing [`long`] case: `RA_SEED=0x... cargo test ... -- --ignored repro`.
+#[test]
+#[ignore]
+fn repro() {
+    let seed = std::env::var("RA_SEED").expect("RA_SEED");
+    let seed = u64::from_str_radix(seed.trim_start_matches("0x"), 16).expect("hex seed");
+    arbtest::arbtest(|u| {
+        let test_case = TestCase::arbitrary(u)?;
+        check(test_case);
+        Ok(())
+    })
+    .seed(seed);
 }

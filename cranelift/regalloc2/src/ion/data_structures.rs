@@ -550,6 +550,9 @@ pub struct Ctx {
     /// Splits per original bundle before falling back to minimal bundles
     /// (`RegallocOptions::max_splits_per_spillset`).
     pub(crate) max_splits_per_spillset: u8,
+    /// Piecewise second-chance allocation of spilled bundles
+    /// (`RegallocOptions::split_spill_bundles`).
+    pub(crate) split_spill_bundles: bool,
 
     // Cached allocation for `try_to_allocate_bundle_to_reg` to avoid allocating
     // a new HashSet on every call.
@@ -622,6 +625,7 @@ impl Default for Ctx {
             debug_annotations: Default::default(),
             annotations_enabled: Default::default(),
             max_splits_per_spillset: MAX_SPLITS_PER_SPILLSET,
+            split_spill_bundles: false,
             conflict_set: Default::default(),
             output: Default::default(),
             scratch_conflicts: Default::default(),
@@ -977,6 +981,11 @@ pub struct Stats {
     pub spill_bundle_count: usize,
     pub spill_bundle_reg_probes: usize,
     pub spill_bundle_reg_success: usize,
+    /// Pieces of spilled bundles placed in a register by the piecewise
+    /// second chance.
+    pub spill_pieces_placed: usize,
+    /// Minimal use LRs that took a placed piece's register.
+    pub spill_uses_absorbed: usize,
     pub blockparam_ins_count: usize,
     pub blockparam_outs_count: usize,
     pub halfmoves_count: usize,

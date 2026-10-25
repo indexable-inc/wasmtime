@@ -112,6 +112,7 @@ pub fn run<F: Function>(
     enable_annotations: bool,
     enable_ssa_checker: bool,
     max_splits_per_spillset: u8,
+    split_spill_bundles: bool,
 ) -> Result<(), RegAllocError> {
     ctx.cfginfo.init(func, &mut ctx.cfginfo_ctx)?;
 
@@ -120,6 +121,7 @@ pub fn run<F: Function>(
     }
 
     ctx.annotations_enabled = enable_annotations;
+    ctx.split_spill_bundles = split_spill_bundles;
     ctx.max_splits_per_spillset = if max_splits_per_spillset == 0 {
         data_structures::MAX_SPLITS_PER_SPILLSET
     } else {

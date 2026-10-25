@@ -684,6 +684,7 @@ impl<'a, F: Function> Env<'a, F> {
                         to: end,
                     };
                     let empty_lr = self.ctx.ranges.add(range, self.ctx.scratch_bump.clone());
+                    self.ctx.ranges[empty_lr].vreg = vreg;
                     self.ctx.bundles[spill].ranges.push(LiveRangeListEntry {
                         range,
                         index: empty_lr,
@@ -749,6 +750,7 @@ impl<'a, F: Function> Env<'a, F> {
                         to: split,
                     };
                     let empty_lr = self.ctx.ranges.add(range, self.ctx.scratch_bump.clone());
+                    self.ctx.ranges[empty_lr].vreg = vreg;
                     self.ctx.bundles[spill].ranges.push(LiveRangeListEntry {
                         range,
                         index: empty_lr,
