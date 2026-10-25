@@ -391,6 +391,17 @@ impl Config {
 
         self.wasmtime.codegen.configure(&mut cfg);
 
+        // Proof-carrying code: with the `fuzz-pcc` feature every module is
+        // compiled with the PCC checker on, across all fuzzed memory
+        // configurations. Memories PCC has no facts for (memory64, shared,
+        // explicit bounds checks) are left unchecked rather than refused, so
+        // modules using them still fuzz the checked ones. (wasm-smith enables
+        // memory64 in almost every generated config, so excluding it, as
+        // upstream did, turns PCC off for nearly all inputs.) Only native
+        // Cranelift has a PCC checker (not Pulley).
+        let pcc = cfg!(feature = "fuzz-pcc")
+            && matches!(compiler_strategy, CompilerStrategy::CraneliftNative);
+
         cfg.codegen.inlining = self.wasmtime.inlining.map(|i| i.into());
 
         // If the wasm-smith-generated module use nan canonicalization then we
@@ -451,6 +462,8 @@ impl Config {
                     Some(pad.to_string()),
                 ));
             }
+
+            cfg.codegen.pcc = Some(pcc);
 
             // Eager init is currently only supported on Cranelift, not Winch.
             cfg.opts.table_lazy_init = Some(self.wasmtime.table_lazy_init);
@@ -785,6 +798,29 @@ impl WasmtimeConfig {
 
             CompilerStrategy::CraneliftPulley => {
                 config.config.threads_enabled = false;
+            }
+        }
+
+        // With `fuzz-pcc`, give PCC memories it can prove: signals-based
+        // traps and a 4 GiB reservation (the default), so the 32-bit memory
+        // accesses use the elided-bounds-check form ix-host runs. (PCC leaves
+        // memories needing explicit bounds checks unchecked, so the random
+        // memory configurations would otherwise check almost nothing.) Guard
+        // sizes, spectre mitigations and everything else stay random.
+        if cfg!(feature = "fuzz-pcc") && self.compiler_strategy == CompilerStrategy::CraneliftNative
+        {
+            self.signals_based_traps = true;
+            // At least one memory, and 32-bit ones (PCC has no memory64
+            // facts), so most modules have accesses to check.
+            config.config.memory64_enabled = false;
+            config.config.min_memories = config.config.min_memories.max(1);
+            config.config.max_memories = config.config.max_memories.max(1);
+            if self
+                .memory_config
+                .memory_reservation
+                .is_some_and(|r| r < 1 << 32)
+            {
+                self.memory_config.memory_reservation = None;
             }
         }
 

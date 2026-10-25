@@ -84,3 +84,7 @@ wasm-spec-interpreter = { path = "./wasm-spec-interpreter", optional = true, fea
 default = ['v8']
 fuzz-spec-interpreter = ['dep:wasm-spec-interpreter']
 v8 = ['dep:v8']
+
+# Compile every non-memory64 module with proof-carrying code checking on.
+# A PCC failure (false positive or real bug) then fails the fuzz input.
+fuzz-pcc = []
