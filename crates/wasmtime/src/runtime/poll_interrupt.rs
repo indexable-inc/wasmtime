@@ -31,16 +31,6 @@
 //! after one coherence round trip. It needs no fence because it only has to
 //! see the store eventually, not in order with anything else.
 //!
-//! # Bulk libcalls
-//!
-//! A `memory.copy` / `memory.fill` of 2 MiB or more is done by its libcall in
-//! chunks (1 MiB, or 64 MiB for a far copy on x86_64), which reads this word
-//! between chunks and, if it is set,
-//! raises `Trap::Interrupt` from the libcall (see `vm/libcalls.rs`,
-//! `bulk_preempt`). That trap is a host-raised one, not a trap instruction,
-//! so it does not go through the jit attribution in `trap.rs`; it is raised
-//! only after the word was read as set.
-//!
 //! [`Config::poll_interruption`]: crate::Config::poll_interruption
 
 use alloc::sync::Arc;

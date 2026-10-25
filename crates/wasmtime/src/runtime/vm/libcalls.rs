@@ -534,6 +534,14 @@ fn bulk_preemptible(store: &mut dyn VMStore) -> bool {
 ///   installed the op runs to the end as upstream and the compiled code's
 ///   next epoch check calls it.
 ///
+/// The poll-mode trap here is raised by the host after reading the word as
+/// set, not by a trap instruction, so it does not go through the jit
+/// attribution in `trap.rs` (`poll_trap_mismatch`).
+///
+/// This note lives here rather than in `poll_interrupt.rs` on purpose: that
+/// file is hashed into the artifact ABI tag (`IX_SOURCE_FILES` in
+/// `crates/environ/build.rs`), and nothing about compiled code changes here.
+///
 /// Only called when `bulk_preemptible` holds.
 ///
 /// # Safety
