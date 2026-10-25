@@ -54,12 +54,15 @@ pub(crate) fn define() -> SettingGroup {
             superlinear on hostile input (many values live across many blocks), and
             without a budget one function of under 1 MB of wasm can take a minute
             and 4 GB. The budget is deterministic: the same function always gets
-            the same outcome. Real code uses at most about a sixth of it.
+            the same outcome. Real code uses at most about a fifth of it; a few
+            functions of Binaryen asyncify output need up to four times it.
 
             Supported options:
 
             - `reject`: fail the compile of that function with
-                        `CodegenError::ImplLimitExceeded`.
+                        `CodegenError::ImplLimitExceeded`. (Wasmtime retries
+                        such a function once at `opt_level=none`, with the
+                        budget still on.)
             - `fallback`: allocate that function again with the single-pass
                           allocator. Its memory stays small, but its time is
                           still blocks x live values on such input (16k

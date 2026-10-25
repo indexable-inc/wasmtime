@@ -98,6 +98,13 @@ impl<T> IsaBuilder<T> {
             .finish(settings::Flags::new(self.shared_flags.clone()))
     }
 
+    /// Build with one shared setting changed from what was configured.
+    pub fn build_with(&self, name: &str, value: &str) -> Result<T> {
+        let mut flags = self.shared_flags.clone();
+        flags.set(name, value)?;
+        Ok(self.inner.finish(settings::Flags::new(flags)))
+    }
+
     pub fn shared_flags(&self) -> Flags {
         settings::Flags::new(self.shared_flags.clone())
     }
