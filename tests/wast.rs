@@ -145,6 +145,15 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
         }
     }
 
+    // ix fork: run the whole suite with proof-carrying code on
+    // (`WASMTIME_TEST_PCC=1`), so a PCC false positive on any spec module
+    // fails the test. Native Cranelift only (x64 and aarch64 checkers).
+    if std::env::var("WASMTIME_TEST_PCC").is_ok()
+        && matches!(config.compiler, Compiler::CraneliftNative)
+    {
+        cfg.cranelift_pcc(true);
+    }
+
     // By default we'll allocate huge chunks (6gb) of the address space for each
     // linear memory. This is typically fine but when we emulate tests with QEMU
     // it turns out that it causes memory usage to balloon massively. Leave a
