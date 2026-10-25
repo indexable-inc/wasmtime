@@ -368,8 +368,9 @@ fn refuses_stack_switching() {
     c.wasm_stack_switching(true);
     c.wasm_exceptions(true);
     c.wasm_function_references(true);
+    // On aarch64 v50 refuses stack switching itself, before our check.
     let err = Engine::new(&c).unwrap_err().to_string();
-    assert!(err.contains("ix_pinned_sp"), "{err}");
+    assert!(err.contains("ix_pinned_sp") || err.contains("stack_switching"), "{err}");
 }
 
 // ---------------------------------------------------- the host's register
