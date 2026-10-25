@@ -245,3 +245,260 @@ fn ix_indirect_artifact_compat() {
     let bytes = Module::new(&off, &wat).unwrap().serialize().unwrap();
     assert!(unsafe { Module::deserialize(&on, &bytes) }.is_err());
 }
+
+/// Rows stop after their last matching element: `$ii` (slots 0, 1, 4) has 5
+/// entries plus the clamp slot, `$v` (slot 2) 3 plus one. A call type with
+/// no element of its type gets no row and keeps the checked path.
+#[test]
+fn ix_indirect_rows_truncated() {
+    let wat = STATIC_WAT.replace(
+        "EXTRA",
+        r#"(type $none (func (param i64) (result i32)))
+           (func (export "call_none") (param $i i32) (result i32)
+             (call_indirect (type $none) (i64.const 1) (local.get $i)))"#,
+    );
+    for (c, on) in configs() {
+        let engine = Engine::new(&c).unwrap();
+        let module = Module::new(&engine, &wat).unwrap();
+        assert_eq!(module.ix_dispatch_rows(), if on { 2 } else { 0 });
+        assert_eq!(module.ix_dispatch_entries(), if on { 6 + 4 } else { 0 });
+        let linker = Linker::new(&engine);
+        let mut i = instantiate(&engine, &module, &linker);
+        check_semantics(&mut i);
+        let none = i
+            .instance
+            .get_typed_func::<i32, i32>(&mut i.store, "call_none")
+            .unwrap();
+        for (idx, want) in [
+            (0, Trap::BadSignature),
+            (3, Trap::IndirectCallToNull),
+            (6, Trap::TableOutOfBounds),
+        ] {
+            let e = none.call(&mut i.store, idx).unwrap_err();
+            assert_eq!(trap_of(e), want, "call_none index {idx}");
+        }
+    }
+}
+
+/// A tiny module can't make a big dispatch array: a 2^20-slot table whose
+/// only elements sit at its end gets no rows (they would be 2^20 entries
+/// each), and the array stays within its bound of 8 entries per element
+/// plus 1024.
+#[test]
+fn ix_indirect_sparse_table_bounded() {
+    const N: usize = 64;
+    let mut wat = String::from("(module\n");
+    for k in 0..N {
+        // Distinct types: k i32 params.
+        let params = " i32".repeat(k);
+        wat.push_str(&format!("(type $t{k} (func (param{params}) (result i32)))\n"));
+        wat.push_str(&format!("(func $f{k} (type $t{k}) (i32.const {k}))\n"));
+    }
+    wat.push_str(&format!("(table {} funcref)\n", 1 << 20));
+    wat.push_str(&format!("(elem (i32.const {})", (1 << 20) - N));
+    for k in 0..N {
+        wat.push_str(&format!(" $f{k}"));
+    }
+    wat.push_str(")\n");
+    for k in 0..N {
+        let args = "(i32.const 0)".repeat(k);
+        wat.push_str(&format!(
+            "(func (export \"c{k}\") (param $i i32) (result i32) (call_indirect (type $t{k}) {args} (local.get $i)))\n"
+        ));
+    }
+    wat.push_str(")\n");
+    let wasm = wat::parse_str(&wat).unwrap();
+    assert!(wasm.len() < 64 * 1024, "{}", wasm.len());
+    for (c, _) in configs() {
+        let engine = Engine::new(&c).unwrap();
+        let module = Module::new(&engine, &wasm).unwrap();
+        assert!(module.ix_dispatch_entries() <= 8 * N + 1024);
+        assert_eq!(module.ix_dispatch_rows(), 0);
+        let mut store = Store::new(&engine, ());
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let c0 = instance
+            .get_typed_func::<i32, i32>(&mut store, "c0")
+            .unwrap();
+        assert_eq!(c0.call(&mut store, (1 << 20) - N as i32).unwrap(), 0);
+        let e = c0.call(&mut store, 0).unwrap_err();
+        assert_eq!(trap_of(e), Trap::IndirectCallToNull);
+    }
+}
+
+/// Many distinct call types over a one-slot table plan in near-linear time
+/// (the plan used to dedupe rows and look them up with linear scans). Every
+/// type is called once in dead code, which validation and the scan still
+/// see; 32 of them also have a function and a live call through a row.
+#[test]
+fn ix_indirect_many_types_compile_fast() {
+    const TYPES: usize = 200_000;
+    // Row `k` is `k + 2` entries: 32 rows fit the cap (8 per element + 1024).
+    const LIVE: usize = 32;
+    let valtypes = ["i32", "i64", "f32", "f64"];
+    let mut wat = String::with_capacity(TYPES * 64);
+    wat.push_str("(module\n");
+    for k in 0..TYPES {
+        // Nine params, the base-4 digits of `k`: all distinct, all final.
+        wat.push_str("(type (func (param");
+        let mut n = k;
+        for _ in 0..9 {
+            wat.push(' ');
+            wat.push_str(valtypes[n % 4]);
+            n /= 4;
+        }
+        wat.push_str(") (result i32)))\n");
+    }
+    let sig = |k: usize| {
+        let mut n = k;
+        let mut s = String::new();
+        for _ in 0..9 {
+            s.push_str(match n % 4 {
+                0 => "(i32.const 0)",
+                1 => "(i64.const 0)",
+                2 => "(f32.const 0)",
+                _ => "(f64.const 0)",
+            });
+            n /= 4;
+        }
+        s
+    };
+    for k in 0..LIVE {
+        wat.push_str(&format!("(func $f{k} (type {k}) (i32.const {k}))\n"));
+    }
+    wat.push_str(&format!("(table {LIVE} funcref)\n(elem (i32.const 0)"));
+    for k in 0..LIVE {
+        wat.push_str(&format!(" $f{k}"));
+    }
+    wat.push_str(")\n(func (export \"dead\")\n unreachable\n");
+    for k in 0..TYPES {
+        wat.push_str(&format!(" call_indirect (type {k}) drop\n"));
+    }
+    wat.push_str(")\n(func (export \"live\") (param $i i32) (result i32)\n (i32.const 0)\n");
+    for k in 0..LIVE {
+        wat.push_str(&format!(
+            " (i32.add (call_indirect (type {k}) {} (i32.const {k})))\n",
+            sig(k)
+        ));
+    }
+    wat.push_str("))\n");
+    let wasm = wat::parse_str(&wat).unwrap();
+    let mut c = config(true, true);
+    c.parallel_compilation(true);
+    let engine = Engine::new(&c).unwrap();
+    let t = std::time::Instant::now();
+    let module = Module::new(&engine, &wasm).unwrap();
+    let took = t.elapsed();
+    assert_eq!(module.ix_dispatch_rows(), LIVE);
+    assert!(took.as_secs() < 60, "compile took {took:?}");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).unwrap();
+    let live = instance
+        .get_typed_func::<i32, i32>(&mut store, "live")
+        .unwrap();
+    assert_eq!(live.call(&mut store, 0).unwrap(), (0..LIVE as i32).sum::<i32>());
+}
+
+/// An element segment that traps at instantiation, after an earlier one
+/// wrote one of this instance's functions into an imported table: the
+/// instance fails, but that function stays callable, and must see the
+/// static table exactly as stock Wasmtime leaves it (its segment, after the
+/// trap, never applied: all null). So the table is not static.
+#[test]
+fn ix_indirect_trap_before_segment_not_static() {
+    let wat = |before: bool| {
+        let st = r#"(elem (table $st) (i32.const 0) func $inc)"#;
+        format!(
+            r#"(module
+              (type $ii (func (param i32) (result i32)))
+              (import "host" "t" (table $imp 1 funcref))
+              (table $st 1 funcref)
+              (func $inc (type $ii) (i32.add (local.get 0) (i32.const 1)))
+              (func $leak (type $ii) (call_indirect $st (type $ii) (local.get 0) (i32.const 0)))
+              {}
+              (elem (table $imp) (i32.const 0) func $leak)
+              (elem (table $imp) (i32.const 1000) func $inc)
+              {}
+              (func (export "call") (param i32) (result i32)
+                (call_indirect $st (type $ii) (local.get 0) (i32.const 0))))"#,
+            if before { "" } else { st },
+            if before { st } else { "" },
+        )
+    };
+    for (c, on) in configs() {
+        let engine = Engine::new(&c).unwrap();
+        // Trap before the static table's segment: not static.
+        let module = Module::new(&engine, &wat(true)).unwrap();
+        assert_eq!(module.ix_dispatch_rows(), 0);
+        let mut store = Store::new(&engine, ());
+        let ty = TableType::new(RefType::FUNCREF, 1, None);
+        let t = Table::new(&mut store, ty, Ref::Func(None)).unwrap();
+        assert!(Instance::new(&mut store, &module, &[t.into()]).is_err());
+        let leaked = t.get(&mut store, 0).unwrap();
+        let leaked = leaked.unwrap_func().unwrap().typed::<i32, i32>(&store).unwrap();
+        let e = leaked.call(&mut store, 5).unwrap_err();
+        assert_eq!(trap_of(e), Trap::IndirectCallToNull);
+
+        // Its segment first, the imported-table ones (which could trap)
+        // only after it: the table is fully applied first, still static.
+        let module = Module::new(&engine, &wat(false)).unwrap();
+        assert_eq!(module.ix_dispatch_rows(), if on { 1 } else { 0 });
+        let mut store = Store::new(&engine, ());
+        let ty = TableType::new(RefType::FUNCREF, 1, None);
+        let t = Table::new(&mut store, ty, Ref::Func(None)).unwrap();
+        assert!(Instance::new(&mut store, &module, &[t.into()]).is_err());
+        let leaked = t.get(&mut store, 0).unwrap();
+        let leaked = leaked.unwrap_func().unwrap().typed::<i32, i32>(&store).unwrap();
+        assert_eq!(leaked.call(&mut store, 5).unwrap(), 6);
+    }
+}
+
+/// Artifacts from earlier fork builds, whose version tag was the hand-bumped
+/// `+ix1` (ca78074 intrinsics, a162330 dispatch v1), are refused with an
+/// error naming the ix ABI, both under the default version strategy and
+/// under a custom version string that matches theirs (then the metadata
+/// check catches them). Fixtures: `tests/all/ix_fixtures/README.md`.
+#[test]
+fn ix_indirect_old_artifacts_rejected() {
+    // (commit, the version string it wrote, the artifact). Each must be
+    // refused by the default strategy (version string), and by the artifact
+    // metadata alone when the version string is not checked (`None`) or
+    // matches (`Custom` set to the old string).
+    let fixtures: [(&str, &str, &[u8]); 3] = [
+        ("ca78074", "50+ix1", include_bytes!("ix_fixtures/ca78074.cwasm")),
+        ("a162330", "50+ix1", include_bytes!("ix_fixtures/a162330.cwasm")),
+        ("217de37", "50+ix3", include_bytes!("ix_fixtures/217de37.cwasm")),
+    ];
+    for (name, old_version, bytes) in fixtures {
+        assert!(
+            bytes.windows(old_version.len()).any(|w| w == old_version.as_bytes()),
+            "{name}: fixture lacks {old_version}"
+        );
+        for dispatch in [false, true] {
+            let strategies = [
+                ("default", ModuleVersionStrategy::WasmtimeVersion),
+                ("custom", ModuleVersionStrategy::Custom(old_version.into())),
+                ("none", ModuleVersionStrategy::None),
+            ];
+            for (label, strategy) in strategies {
+                let what = format!("{name} ({label}, dispatch {dispatch})");
+                let mut c = config(dispatch, true);
+                c.module_version(strategy).unwrap();
+                let engine = Engine::new(&c).unwrap();
+                let err = unsafe { Module::deserialize(&engine, bytes) }.unwrap_err();
+                let msg = format!("{err:?}");
+                assert!(msg.contains("ix fork ABI"), "{what}: {msg}");
+            }
+        }
+    }
+    // And this build's own artifacts carry the new version and load.
+    let engine = Engine::new(&config(true, true)).unwrap();
+    let wat = STATIC_WAT.replace("EXTRA", "");
+    let bytes = Module::new(&engine, &wat).unwrap().serialize().unwrap();
+    let tag = format!("+ix{}.{}", wasmtime::IX_INTRINSICS_ABI, wasmtime_environ_tag());
+    assert!(bytes.windows(tag.len()).any(|w| w == tag.as_bytes()));
+    unsafe { Module::deserialize(&engine, &bytes) }.unwrap();
+}
+
+fn wasmtime_environ_tag() -> &'static str {
+    wasmtime::IX_ABI_TAG
+}

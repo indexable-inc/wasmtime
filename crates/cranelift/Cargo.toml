@@ -50,3 +50,5 @@ all-arch = ["cranelift-codegen/all-arch"]
 host-arch = ["cranelift-codegen/host-arch"]
 pulley = ["cranelift-codegen/pulley", "dep:pulley-interpreter"]
 trace-log = ["cranelift-codegen/trace-log"]
+# ix fork, UNSAFE: compile in `Tunables::ix_unsafe_ci_nocheck` (bench only).
+ix-unsafe-bench = []

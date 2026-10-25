@@ -42,7 +42,7 @@
 //! `None` skip the version string). `N` is written once, in
 //! `ix_intrinsics_abi!`.
 
-use crate::{Module, Tunables};
+use crate::{IxDispatchPlan, IxDispatchRow, Module, Tunables};
 
 /// ix fork: define a serialized struct and record its field list (names and
 /// types, not attributes or docs) as `Self::IX_SCHEMA` for [`IX_ABI_HASH`].
@@ -92,15 +92,27 @@ macro_rules! ix_abi_struct {
 ///   `SCHEMAS` below; a new vmctx field is picked up from
 ///   `for_each_vmctx_type!` with no edit here.
 pub const IX_FEATURES: &[(&str, u32)] = &[
+    // `ix_leaf_stack_slack`, `ix_table_devirt`; their codegen and the
+    // static-table proof are in `IX_SOURCES`.
+    ("check-trim", 1),
     // The `ix` intrinsics module; `IX_INTRINSICS_ABI`.
     ("intrinsics", crate::IX_INTRINSICS_ABI),
     // `poll_interruption`: the vmctx `poll_ptr` word, tested at every
     // function entry and loop header.
     ("poll-interruption", 1),
+    // `ix_static_call_indirect`: `IxDispatchPlan` in `Module`, the
+    // `ix_dispatch` vmctx field. 2: rows truncated after their last match,
+    // a zero entry falls back to the checked call, rows ranked by sites
+    // per entry under an 8-per-element cap.
+    ("static-call-indirect", 2),
 ];
 
 /// Serialized struct schemas covered by the hash.
-const SCHEMAS: &[&str] = &[Module::IX_SCHEMA];
+const SCHEMAS: &[&str] = &[
+    Module::IX_SCHEMA,
+    IxDispatchPlan::IX_SCHEMA,
+    IxDispatchRow::IX_SCHEMA,
+];
 
 macro_rules! ix_stringify_all {
     ($($t:tt)*) => {
@@ -199,6 +211,10 @@ mod tests {
     fn layout_text_is_captured() {
         assert!(VMCTX_LAYOUT.contains("type_ids"));
         assert!(VMCTX_LAYOUT.contains("poll_ptr"));
+        assert!(VMCTX_LAYOUT.contains("ix_dispatch"));
+        assert!(Module::IX_SCHEMA.contains("ix_dispatch"));
+        assert!(IxDispatchRow::IX_SCHEMA.contains("len"));
+        assert!(Tunables::IX_FIELDS.contains("ix_static_call_indirect"));
         assert!(Module::IX_SCHEMA.contains("ix_intrinsics"));
         assert!(Tunables::IX_FIELDS.contains("table_lazy_init"));
         assert_eq!(IX_ABI_TAG.len(), 16);

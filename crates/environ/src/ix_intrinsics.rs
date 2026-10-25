@@ -25,7 +25,7 @@ pub const IX_INTRINSIC_MODULE: &str = "ix";
 #[macro_export]
 macro_rules! ix_intrinsics_abi {
     () => {
-        3
+        4
     };
 }
 
@@ -42,6 +42,8 @@ macro_rules! ix_intrinsics_abi {
 ///   nonzero) instead of a page whose load faults. An `ix2` artifact would
 ///   still load against an `ix3` runtime but could never be interrupted, so
 ///   it must not load.
+/// - 4: the vmctx `ix_dispatch` field and `Module::ix_dispatch` (static-table
+///   `call_indirect` dispatch); an `ix3` artifact must not load.
 pub const IX_INTRINSICS_ABI: u32 = ix_intrinsics_abi!();
 
 macro_rules! intrinsics {

@@ -212,6 +212,13 @@ impl Module {
         self.inner.module.module().ix_dispatch.rows.len()
     }
 
+    /// ix fork, for tests and benches: the number of pointer-sized entries
+    /// in this module's `call_indirect` dispatch array.
+    #[doc(hidden)]
+    pub fn ix_dispatch_entries(&self) -> usize {
+        self.inner.module.module().ix_dispatch.entries as usize
+    }
+
     /// Creates a new WebAssembly `Module` from the given in-memory `bytes`.
     ///
     /// The `bytes` provided must be in one of the following formats:
@@ -1359,9 +1366,12 @@ mod tests {
 
 /// ix fork: fill the module's `call_indirect` dispatch array from its plan
 /// (`wasmtime_environ::IxDispatchPlan`), once per module, then make it
-/// read-only. Entry `row.start + i` is the wasm-ABI entry of element `i`'s
-/// function when that function's engine-canonical type is the row's
-/// (final) type, else 0; each row's last entry stays 0.
+/// read-only. Entry `row.start + i` for `i < row.len` is the wasm-ABI entry of
+/// element `i`'s function when that function's engine-canonical type is the
+/// row's (final) type, else 0; each row's last entry stays 0. Written in
+/// place into a fresh zeroed mapping (no temporary copy); its size is
+/// bounded by the plan, which the compiler caps in proportion to the
+/// module's element segments.
 fn ix_build_dispatch(
     engine: &Engine,
     code: &EngineCode,
@@ -1370,6 +1380,12 @@ fn ix_build_dispatch(
     use wasmtime_environ::DefinedFuncIndex;
     let env = module.module();
     let plan = &env.ix_dispatch;
+    // A row with no array would leave the vmctx field null under code that
+    // loads through it (a deserialized artifact is checked, not trusted).
+    ensure!(
+        plan.rows.is_empty() == (plan.entries == 0),
+        "ix dispatch plan has rows but no entries"
+    );
     if plan.entries == 0 {
         return Ok(None);
     }
@@ -1380,47 +1396,64 @@ fn ix_build_dispatch(
         "ix call_indirect dispatch needs guest debugging off"
     );
     let text = code.ix_shared_text_base();
-    let mut entries = vec![0usize; usize::try_from(plan.entries)?];
-    for row in plan.rows.iter() {
-        let want = code
-            .signatures()
-            .shared_type(row.ty)
-            .context("ix dispatch row type not registered")?;
-        let image = plan
-            .images
-            .get(usize::try_from(row.image)?)
-            .context("ix dispatch row image out of range")?;
-        let start = usize::try_from(row.start)?;
-        let dst = entries
-            .get_mut(start..start + image.len() + 1)
-            .context("ix dispatch row out of range")?;
-        for (slot, &d) in dst.iter_mut().zip(image.iter()) {
-            if d == u32::MAX {
-                continue;
+    let entries = usize::try_from(plan.entries)?;
+    let bytes = entries
+        .checked_mul(core::mem::size_of::<usize>())
+        .context("ix dispatch array too large")?;
+    let mut mmap = MmapVec::with_capacity_and_alignment(bytes, core::mem::align_of::<usize>())?;
+    {
+        // SAFETY: a fresh, writable, zeroed mapping nothing else refers to.
+        let raw = unsafe { mmap.as_mut_slice() };
+        ensure!(
+            raw.as_ptr().addr() % core::mem::align_of::<usize>() == 0,
+            "ix dispatch array misaligned"
+        );
+        // SAFETY: `raw` is `bytes` long and aligned for `usize` (checked
+        // above), and every bit pattern is a valid `usize`.
+        let slots: &mut [usize] =
+            unsafe { core::slice::from_raw_parts_mut(raw.as_mut_ptr().cast(), entries) };
+        for row in plan.rows.iter() {
+            let want = code
+                .signatures()
+                .shared_type(row.ty)
+                .context("ix dispatch row type not registered")?;
+            let image = plan
+                .images
+                .get(usize::try_from(row.image)?)
+                .context("ix dispatch row image out of range")?;
+            let len = usize::try_from(row.len)?;
+            let image = image.get(..len).context("ix dispatch row longer than its image")?;
+            let start = usize::try_from(row.start)?;
+            let dst = len
+                .checked_add(1)
+                .and_then(|n| start.checked_add(n))
+                .and_then(|end| slots.get_mut(start..end))
+                .context("ix dispatch row out of range")?;
+            for (slot, &d) in dst.iter_mut().zip(image.iter()) {
+                if d == u32::MAX {
+                    continue;
+                }
+                ensure!(
+                    usize::try_from(d)? < env.num_defined_funcs(),
+                    "ix dispatch element out of range"
+                );
+                let def = DefinedFuncIndex::from_u32(d);
+                let f = env.func_index(def);
+                let have = env
+                    .functions
+                    .get(f)
+                    .context("ix dispatch element out of range")?
+                    .signature
+                    .unwrap_engine_type_index();
+                if have != want {
+                    continue;
+                }
+                let range =
+                    module.function_range(FuncKey::DefinedWasmFunction(env.module_index, def));
+                *slot = text + range.start;
             }
-            let def = DefinedFuncIndex::from_u32(d);
-            let f = env.func_index(def);
-            let have = env
-                .functions
-                .get(f)
-                .context("ix dispatch element out of range")?
-                .signature
-                .unwrap_engine_type_index();
-            if have != want {
-                continue;
-            }
-            let range = module.function_range(FuncKey::DefinedWasmFunction(env.module_index, def));
-            *slot = text + range.start;
         }
     }
-    // SAFETY: `usize` has no padding or invalid bit patterns.
-    let bytes = unsafe {
-        core::slice::from_raw_parts(
-            entries.as_ptr().cast::<u8>(),
-            entries.len() * core::mem::size_of::<usize>(),
-        )
-    };
-    let mmap = MmapVec::from_slice_with_alignment(bytes, core::mem::align_of::<usize>())?;
     #[cfg(has_virtual_memory)]
     if mmap.supports_virtual_memory() {
         // SAFETY: nothing else refers to this fresh mapping yet.

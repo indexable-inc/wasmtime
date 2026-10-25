@@ -109,6 +109,10 @@ wasmtime_option_group! {
         /// can never change. (default: no)
         pub ix_table_devirt: Option<bool>,
 
+        /// ix fork: lower `call_indirect` through static tables to a load
+        /// from a read-only per-type dispatch row. (default: no)
+        pub ix_static_call_indirect: Option<bool>,
+
         /// Enable the pooling allocator, in place of the on-demand allocator.
         pub pooling_allocator: Option<bool>,
 
@@ -1087,6 +1091,9 @@ impl CommonOptions {
         if let Some(enable) = self.opts.ix_table_devirt {
             config.ix_table_devirt(enable);
         }
+        if let Some(enable) = self.opts.ix_static_call_indirect {
+            config.ix_static_call_indirect(enable);
+        }
 
         if let Some(n) = self.opts.gc_zeal_alloc_counter
             && (cfg!(gc_zeal) || cfg!(fuzzing))
@@ -1451,6 +1458,7 @@ impl CommonOptions {
                 table_lazy_init: Some(engine.get_table_lazy_init()),
                 ix_leaf_stack_slack: Some(engine.get_ix_leaf_stack_slack()),
                 ix_table_devirt: Some(engine.get_ix_table_devirt()),
+                ix_static_call_indirect: Some(engine.get_ix_static_call_indirect()),
                 memory_init_cow: Some(engine.get_memory_init_cow()),
                 memory_guaranteed_dense_image_size: Some(
                     engine.get_memory_guaranteed_dense_image_size(),

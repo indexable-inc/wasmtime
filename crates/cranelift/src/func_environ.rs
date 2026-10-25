@@ -1865,17 +1865,18 @@ impl FuncEnvironment<'_> {
         (have == want).then_some(f)
     }
 
-    /// ix fork: the dispatch row (first entry, table size) for a
+    /// ix fork: the dispatch row (first entry, length) for a
     /// `call_indirect` of `ty_index` through `table`, when the module has
     /// one (`Tunables::ix_static_call_indirect`; see
-    /// `wasmtime_environ::IxDispatchPlan`).
+    /// `wasmtime_environ::IxDispatchPlan`). A binary search: the rows are
+    /// sorted.
     fn ix_dispatch_row(&self, table: TableIndex, ty_index: TypeIndex) -> Option<(u32, u32)> {
         if !self.tunables.ix_static_call_indirect {
             return None;
         }
         let ty = self.module.types[ty_index].unwrap_module_type_index();
-        let (row, n) = self.module.ix_dispatch.row(table, ty)?;
-        Some((row.start, n))
+        let row = self.module.ix_dispatch.row(table, ty)?;
+        Some((row.start, row.len))
     }
 
     fn make_table(&mut self, func: &mut ir::Function, index: TableIndex) -> TableData {
@@ -2359,10 +2360,20 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             });
         }
         // ix fork: a static table with a dispatch row for this type.
-        if let Some((start, n)) = self.env.ix_dispatch_row(table_index, ty_index) {
-            return self.ix_dispatch_call(table_index, ty_index, sig_ref, callee, call_args, start, n);
+        if let Some((start, len)) = self.env.ix_dispatch_row(table_index, ty_index) {
+            return self.ix_dispatch_call(
+                table_index,
+                ty_index,
+                sig_ref,
+                callee,
+                call_args,
+                start,
+                len,
+            );
         }
-        // ix fork, UNSAFE bench-only ceiling (`Tunables::ix_unsafe_ci_nocheck`).
+        // ix fork, UNSAFE bench-only ceiling (`Tunables::ix_unsafe_ci_nocheck`),
+        // compiled in only with the `ix-unsafe-bench` feature.
+        #[cfg(feature = "ix-unsafe-bench")]
         if self.env.tunables.ix_unsafe_ci_nocheck > 0 {
             let (code_ptr, callee_vmctx) = self.ix_unsafe_load_code(table_index, callee);
             return self
@@ -2384,20 +2395,22 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
     }
 
     /// ix fork: `call_indirect` through a dispatch row
-    /// (`wasmtime_environ::IxDispatchPlan`). The row has `n + 1` entries
-    /// from `start`: entry `i < n` is the code of element `i` when its
-    /// function has exactly the call's (final) type, else 0, and entry `n`
+    /// (`wasmtime_environ::IxDispatchPlan`). The row has `len + 1` entries
+    /// from `start`: entry `i < len` is the code of element `i` when its
+    /// function has exactly the call's (final) type, else 0, and entry `len`
     /// is 0. So:
     ///
-    /// * the index is clamped to `n` with a Spectre-safe select (no
+    /// * the index is clamped to `len` with a Spectre-safe select (no
     ///   branch), so the load stays inside the row even under
     ///   misspeculation;
     /// * a non-zero entry is a function of this module of the right type:
     ///   call it with our own vmctx as its vmctx too (every element of a
     ///   static table is this instance's own function);
-    /// * a zero entry means out of bounds, null, or a type mismatch: the
-    ///   ordinary fully checked lowering then always traps, with the right
-    ///   trap code, in a cold block.
+    /// * a zero entry (out of bounds, null, another type, or past the row's
+    ///   last match) runs the ordinary fully checked load in a cold block,
+    ///   which traps with the usual code or yields the callee, and joins the
+    ///   same call. The row is only a cache: whatever it holds, a zero
+    ///   entry behaves exactly like stock Wasmtime.
     fn ix_dispatch_call(
         mut self,
         table_index: TableIndex,
@@ -2406,9 +2419,9 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         callee: ir::Value,
         call_args: &[ir::Value],
         start: u32,
-        n: u32,
+        len: u32,
     ) -> WasmResult<Option<CallRets>> {
-        log::debug!(target: "ix_check_trim", "call_indirect via dispatch row at {start} (n={n})");
+        log::debug!(target: "ix_check_trim", "call_indirect via dispatch row at {start} (len={len})");
         let pointer_type = self.env.pointer_type();
         let vmctx = self.caller_vmctx();
         let base = self
@@ -2418,7 +2431,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             .ix_dispatch()
             .load(&mut self.builder.cursor(), vmctx);
         let index_ty = self.builder.func.dfg.value_type(callee);
-        let bound = self.builder.ins().iconst(index_ty, i64::from(n));
+        let bound = self.builder.ins().iconst(index_ty, i64::from(len));
         let oob = self
             .builder
             .ins()
@@ -2441,28 +2454,35 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             row_offset,
         );
 
-        let fast = self.builder.create_block();
+        let join = self.builder.create_block();
+        let join_code = self.builder.append_block_param(join, pointer_type);
+        let join_vmctx = self.builder.append_block_param(join, pointer_type);
         let slow = self.builder.create_block();
         self.builder.set_cold_block(slow);
-        self.builder.ins().brif(code, fast, &[], slow, &[]);
+        self.builder
+            .ins()
+            .brif(code, join, &[code.into(), vmctx.into()], slow, &[]);
 
         self.builder.switch_to_block(slow);
         self.builder.seal_block(slow);
-        if self
-            .check_and_load_code_and_callee_vmctx(table_index, ty_index, callee, true)?
-            .is_some()
-        {
-            // The checks above trap for every index with a zero entry; this
-            // is never reached.
-            self.env.trap(self.builder, crate::TRAP_BAD_SIGNATURE);
+        match self.check_and_load_code_and_callee_vmctx(table_index, ty_index, callee, true)? {
+            Some((slow_code, slow_vmctx)) => {
+                self.builder
+                    .ins()
+                    .jump(join, &[slow_code.into(), slow_vmctx.into()]);
+            }
+            // The checks trap unconditionally (statically mismatched
+            // type); the block already ends in that trap.
+            None => {}
         }
 
-        self.builder.switch_to_block(fast);
-        self.builder.seal_block(fast);
-        self.unchecked_call_impl(sig_ref, code, vmctx, call_args)
+        self.builder.switch_to_block(join);
+        self.builder.seal_block(join);
+        self.unchecked_call_impl(sig_ref, join_code, join_vmctx, call_args)
             .map(Some)
     }
 
+    #[cfg(feature = "ix-unsafe-bench")]
     /// ix fork, UNSAFE: the table element's code pointer and vmctx with no
     /// bounds, Spectre, lazy-init, null or signature check. Bench only.
     fn ix_unsafe_load_code(

@@ -13,9 +13,14 @@ use std::path::Path;
 /// beyond the layouts. A fork branch adds the files its feature lives in
 /// (keep sorted; a merge keeps every line).
 const IX_SOURCES: &[&str] = &[
+    "../../cranelift/codegen/src/machinst/abi.rs",
     "../cranelift/src/alias_region.rs",
+    "../cranelift/src/compiler.rs",
     "../cranelift/src/func_environ.rs",
+    "../wasmtime/src/runtime/module.rs",
     "../wasmtime/src/runtime/poll_interrupt.rs",
+    "src/compile/ix_tables.rs",
+    "src/ix_dispatch.rs",
     "src/ix_intrinsics.rs",
 ];
 

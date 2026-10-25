@@ -1001,15 +1001,18 @@ impl Config {
     /// Static means what [`Config::ix_table_devirt`] means, read only from the
     /// module's own bytes, plus: the table is 32-bit indexed and every
     /// non-null element is a function the module defines. For each final call
-    /// type `T` used through such a table, the module gets one row of code
-    /// pointers over the table, built once when the module is loaded, made
+    /// type `T` used through such a table and held by at least one element,
+    /// the module gets one row of code pointers over the table up to its last
+    /// element of type `T`, built once when the module is loaded, made
     /// read-only, and shared by every instance: a slot whose function has
     /// exactly type `T` holds its code, every other slot (another type, or
-    /// null) holds 0, and one extra slot past the end takes an out-of-bounds
-    /// index (the index is clamped to it with a Spectre-safe conditional
+    /// null) holds 0, and one extra slot past the end takes any index beyond
+    /// the row (the index is clamped to it with a Spectre-safe conditional
     /// move). The call loads the slot and calls it with the caller's own
-    /// vmctx; a 0 slot branches to the ordinary checked lowering, which
-    /// traps with the usual code. Every other table keeps every check.
+    /// vmctx; a 0 slot branches to the ordinary checked lowering, which calls
+    /// or traps exactly as without this setting. The rows of a module hold at
+    /// most 8 entries per table element (plus 1024, at most 2^20 entries,
+    /// 8 MiB); rows with the fewest call sites per entry are dropped first. Every other table keeps every check.
     ///
     /// Has no effect with guest debugging on. Part of the artifact
     /// compatibility check. By default this is off.
@@ -1030,6 +1033,10 @@ impl Config {
     ///
     /// Only for modules known to make only well-typed in-bounds indirect
     /// calls (and, at level 2, only to functions they define).
+    ///
+    /// Only exists with the `ix-unsafe-bench` cargo feature (off by
+    /// default).
+    #[cfg(feature = "ix-unsafe-bench")]
     pub unsafe fn ix_unsafe_ci_nocheck(&mut self, level: u32) -> &mut Self {
         self.tunables.ix_unsafe_ci_nocheck = Some(level);
         self
@@ -5163,6 +5170,11 @@ impl Engine {
     /// Returns the configured [`Config::ix_table_devirt`] value.
     pub fn get_ix_table_devirt(&self) -> bool {
         self.tunables().ix_table_devirt
+    }
+
+    /// Returns the configured [`Config::ix_static_call_indirect`] value.
+    pub fn get_ix_static_call_indirect(&self) -> bool {
+        self.tunables().ix_static_call_indirect
     }
 
     /// The distance from the stack pointer at entry to wasm down to the stack
