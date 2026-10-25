@@ -301,7 +301,8 @@ fn start_function_is_interruptible() -> Result<()> {
 fn artifact_from_older_fork_abi_is_rejected() -> Result<()> {
     // ix3 changed what a poll does (test a word, not fault on a page), so an
     // `+ix2` artifact would run but never be interrupted: it, like any older
-    // one, must be refused before any of its code runs.
+    // one, must be refused before any of its code runs. The version string
+    // is `<major>+ix<N>.<abi tag>`; rewriting `N` alone must be refused.
     let engine = engine(|_| {});
     // The version suffix and `IX_INTRINSICS_ABI` come from one constant.
     let cur = format!("+ix{IX_INTRINSICS_ABI}");

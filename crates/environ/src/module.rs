@@ -170,117 +170,119 @@ impl TableSegmentElements {
     }
 }
 
-/// A translated WebAssembly module, excluding the function bodies and
-/// memory initializers.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Module {
-    /// This module's index.
-    pub module_index: StaticModuleIndex,
+crate::ix_abi_struct! {
+    /// A translated WebAssembly module, excluding the function bodies and
+    /// memory initializers.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Module {
+        /// This module's index.
+        pub module_index: StaticModuleIndex,
 
-    /// A pool of strings used in this module.
-    pub strings: StringPool,
+        /// A pool of strings used in this module.
+        pub strings: StringPool,
 
-    /// The name of this wasm module, often found in the wasm file.
-    pub name: Option<Atom>,
+        /// The name of this wasm module, often found in the wasm file.
+        pub name: Option<Atom>,
 
-    /// All import records, in the order they are declared in the module.
-    pub initializers: TryVec<Initializer>,
+        /// All import records, in the order they are declared in the module.
+        pub initializers: TryVec<Initializer>,
 
-    /// Exported entities.
-    pub exports: TryIndexMap<Atom, EntityIndex>,
+        /// Exported entities.
+        pub exports: TryIndexMap<Atom, EntityIndex>,
 
-    /// Whether or not this module has a start function,
-    pub startup: ModuleStartup,
+        /// Whether or not this module has a start function,
+        pub startup: ModuleStartup,
 
-    /// Precompute per-table static images, if applicable.
-    ///
-    /// This map tracks, for each defined table in this module, the initial
-    /// precomputed contents of the table. This is only applicable for funcref
-    /// tables and the `TryVec` here uses `FuncIndex::reserved_value()` for null
-    /// entries. This structure is filled in if table initialization is detected
-    /// to be infallible as part of [`ModuleTranslation::finalize_table_init`].
-    pub table_initialization: TryPrimaryMap<DefinedTableIndex, TryVec<FuncIndex>>,
+        /// Precompute per-table static images, if applicable.
+        ///
+        /// This map tracks, for each defined table in this module, the initial
+        /// precomputed contents of the table. This is only applicable for funcref
+        /// tables and the `TryVec` here uses `FuncIndex::reserved_value()` for null
+        /// entries. This structure is filled in if table initialization is detected
+        /// to be infallible as part of [`ModuleTranslation::finalize_table_init`].
+        pub table_initialization: TryPrimaryMap<DefinedTableIndex, TryVec<FuncIndex>>,
 
-    /// WebAssembly linear memory initializer.
-    ///
-    /// This will track how memory is initialized, either exclusively via
-    /// segments or if some memories can be initialized with static images. This
-    /// is computed during [`ModuleTranslation::finalize_memory_init`].
-    pub memory_initialization: MemoryInitialization,
+        /// WebAssembly linear memory initializer.
+        ///
+        /// This will track how memory is initialized, either exclusively via
+        /// segments or if some memories can be initialized with static images. This
+        /// is computed during [`ModuleTranslation::finalize_memory_init`].
+        pub memory_initialization: MemoryInitialization,
 
-    /// WebAssembly passive elements.
-    ///
-    /// This is a map of all passive element segments to their type and the
-    /// initial size of the segment. Note that the contents of the segment are
-    /// initialized by compiled code.
-    pub passive_elements: TryPrimaryMap<PassiveElemIndex, (WasmRefType, u64)>,
+        /// WebAssembly passive elements.
+        ///
+        /// This is a map of all passive element segments to their type and the
+        /// initial size of the segment. Note that the contents of the segment are
+        /// initialized by compiled code.
+        pub passive_elements: TryPrimaryMap<PassiveElemIndex, (WasmRefType, u64)>,
 
-    /// Where runtime data segments are located in the module's image.
-    ///
-    /// Note that this does not directly correspond to either active or passive
-    /// data segments. Those are massaged during
-    /// [`ModuleTranslation::finalize_memory_init`] into the form used here.
-    pub runtime_data: TryPrimaryMap<RuntimeDataIndex, Range<u32>>,
+        /// Where runtime data segments are located in the module's image.
+        ///
+        /// Note that this does not directly correspond to either active or passive
+        /// data segments. Those are massaged during
+        /// [`ModuleTranslation::finalize_memory_init`] into the form used here.
+        pub runtime_data: TryPrimaryMap<RuntimeDataIndex, Range<u32>>,
 
-    /// Types declared in the wasm module.
-    pub types: TryPrimaryMap<TypeIndex, EngineOrModuleTypeIndex>,
+        /// Types declared in the wasm module.
+        pub types: TryPrimaryMap<TypeIndex, EngineOrModuleTypeIndex>,
 
-    /// Number of imported or aliased functions in the module.
-    pub num_imported_funcs: usize,
+        /// Number of imported or aliased functions in the module.
+        pub num_imported_funcs: usize,
 
-    /// Number of imported or aliased tables in the module.
-    pub num_imported_tables: usize,
+        /// Number of imported or aliased tables in the module.
+        pub num_imported_tables: usize,
 
-    /// Number of imported or aliased memories in the module.
-    pub num_imported_memories: usize,
+        /// Number of imported or aliased memories in the module.
+        pub num_imported_memories: usize,
 
-    /// Number of imported or aliased globals in the module.
-    pub num_imported_globals: usize,
+        /// Number of imported or aliased globals in the module.
+        pub num_imported_globals: usize,
 
-    /// Number of imported or aliased tags in the module.
-    pub num_imported_tags: usize,
+        /// Number of imported or aliased tags in the module.
+        pub num_imported_tags: usize,
 
-    /// Does this module need a GC heap to run?
-    pub needs_gc_heap: bool,
+        /// Does this module need a GC heap to run?
+        pub needs_gc_heap: bool,
 
-    /// Number of functions that "escape" from this module may need to have a
-    /// `VMFuncRef` constructed for them.
-    ///
-    /// This is also the number of functions in the `functions` array below with
-    /// an `func_ref` index (and is the maximum func_ref index).
-    pub num_escaped_funcs: usize,
+        /// Number of functions that "escape" from this module may need to have a
+        /// `VMFuncRef` constructed for them.
+        ///
+        /// This is also the number of functions in the `functions` array below with
+        /// an `func_ref` index (and is the maximum func_ref index).
+        pub num_escaped_funcs: usize,
 
-    /// Types of functions, imported and local.
-    pub functions: TryPrimaryMap<FuncIndex, FunctionType>,
+        /// Types of functions, imported and local.
+        pub functions: TryPrimaryMap<FuncIndex, FunctionType>,
 
-    /// WebAssembly tables.
-    pub tables: TryPrimaryMap<TableIndex, Table>,
+        /// WebAssembly tables.
+        pub tables: TryPrimaryMap<TableIndex, Table>,
 
-    /// WebAssembly linear memory plans.
-    pub memories: TryPrimaryMap<MemoryIndex, Memory>,
+        /// WebAssembly linear memory plans.
+        pub memories: TryPrimaryMap<MemoryIndex, Memory>,
 
-    /// WebAssembly global variables.
-    pub globals: TryPrimaryMap<GlobalIndex, Global>,
+        /// WebAssembly global variables.
+        pub globals: TryPrimaryMap<GlobalIndex, Global>,
 
-    /// "Simple" WebAssembly global initializers for locally-defined globals.
-    ///
-    /// This map does not track initialization of all globals in this module,
-    /// but only those considered "simple" which can be easily evaluated at
-    /// compile-time. For example an initialization expression of `i32.const N`
-    /// is considered simple. These globals are manually initialized in the
-    /// host.
-    ///
-    /// This is all in contrast to [`ModuleTranslation::global_initializers`]
-    /// which is processed in compiled code and initialized after the instance
-    /// has been created.
-    pub global_initializers: TryVec<(DefinedGlobalIndex, GlobalConstValue)>,
+        /// "Simple" WebAssembly global initializers for locally-defined globals.
+        ///
+        /// This map does not track initialization of all globals in this module,
+        /// but only those considered "simple" which can be easily evaluated at
+        /// compile-time. For example an initialization expression of `i32.const N`
+        /// is considered simple. These globals are manually initialized in the
+        /// host.
+        ///
+        /// This is all in contrast to [`ModuleTranslation::global_initializers`]
+        /// which is processed in compiled code and initialized after the instance
+        /// has been created.
+        pub global_initializers: TryVec<(DefinedGlobalIndex, GlobalConstValue)>,
 
-    /// WebAssembly exception and control tags.
-    pub tags: TryPrimaryMap<TagIndex, Tag>,
+        /// WebAssembly exception and control tags.
+        pub tags: TryPrimaryMap<TagIndex, Tag>,
 
-    /// Imported functions that are `ix` intrinsics (indexable fork): lowered
-    /// inline, never linked, and absent from `initializers`. Sorted by index.
-    pub ix_intrinsics: TryVec<(FuncIndex, crate::IxIntrinsic)>,
+        /// Imported functions that are `ix` intrinsics (indexable fork): lowered
+        /// inline, never linked, and absent from `initializers`. Sorted by index.
+        pub ix_intrinsics: TryVec<(FuncIndex, crate::IxIntrinsic)>,
+    }
 }
 
 /// Initialization routines for creating an instance, encompassing imports,

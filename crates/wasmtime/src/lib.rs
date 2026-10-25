@@ -515,7 +515,9 @@ pub use wasmtime_environ::ToWasmtimeResult;
 #[doc(inline)]
 pub use wasmtime_environ::error;
 pub use wasmtime_environ::{FuncIndex, StaticModuleIndex};
-pub use wasmtime_environ::{IX_INTRINSIC_MODULE, IX_INTRINSICS_ABI, IxIntrinsic};
+pub use wasmtime_environ::{
+    IX_ABI_HASH, IX_ABI_TAG, IX_FEATURES, IX_INTRINSIC_MODULE, IX_INTRINSICS_ABI, IxIntrinsic,
+};
 pub use wasmtime_environ::{OperatorCost, VariableOperatorCost};
 
 // Only for use in `bindgen!`-generated code.

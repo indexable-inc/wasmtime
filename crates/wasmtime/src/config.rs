@@ -116,6 +116,40 @@ impl core::hash::Hash for ModuleVersionStrategy {
     }
 }
 
+/// ix fork: `<major>+ix<N>.`, `N` from `ix_intrinsics_abi!`.
+const IX_VERSION_PREFIX: &str = concat!(
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    "+ix",
+    wasmtime_environ::ix_intrinsics_abi!(),
+    "."
+);
+const IX_VERSION_LEN: usize = IX_VERSION_PREFIX.len() + wasmtime_environ::IX_ABI_TAG.len();
+const IX_VERSION_BYTES: [u8; IX_VERSION_LEN] = {
+    let mut out = [0u8; IX_VERSION_LEN];
+    let parts = [IX_VERSION_PREFIX, wasmtime_environ::IX_ABI_TAG];
+    let mut n = 0;
+    let mut p = 0;
+    while p < parts.len() {
+        let b = parts[p].as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            out[n] = b[i];
+            n += 1;
+            i += 1;
+        }
+        p += 1;
+    }
+    out
+};
+
+/// ix fork: the default artifact version string, `<major>+ix<N>.<tag>`:
+/// `N` is the semantic fork ABI (`ix_intrinsics_abi!`), `tag` is
+/// `wasmtime_environ::IX_ABI_TAG`, the layout/feature/source fingerprint.
+pub(crate) const IX_MODULE_VERSION: &str = match core::str::from_utf8(&IX_VERSION_BYTES) {
+    Ok(s) => s,
+    Err(_) => panic!(),
+};
+
 impl ModuleVersionStrategy {
     /// Get the string-encoding version of the module.
     pub fn as_str(&self) -> &str {
@@ -128,12 +162,12 @@ impl ModuleVersionStrategy {
             // every field after `epoch_ptr`, so an `ix1` artifact must not
             // load. 3 changed what a poll does with that pointer (test a
             // word, not fault on a page): an `ix2` artifact would never be
-            // interrupted.
-            Self::WasmtimeVersion => concat!(
-                env!("CARGO_PKG_VERSION_MAJOR"),
-                "+ix",
-                wasmtime_environ::ix_intrinsics_abi!()
-            ),
+            // interrupted. The `.<tag>` after it is `IX_ABI_TAG`, a hash of
+            // the vmctx layout, the serialized structs, the ix feature set and
+            // the fork's own sources (`wasmtime_environ::ix_abi`), so a
+            // forgotten bump or two branches with the same `N` cannot share
+            // a version.
+            Self::WasmtimeVersion => IX_MODULE_VERSION,
             Self::Custom(c) => c,
             Self::None => "",
         }

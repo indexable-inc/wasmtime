@@ -119,12 +119,31 @@ pub fn check_compatible(engine: &Engine, mmap: &[u8], expected: ObjectKind) -> R
         ModuleVersionStrategy::None => { /* ignore the version info, accept all */ }
         _ => {
             let version = core::str::from_utf8(&version)?;
-            if version != engine.config().module_version.as_str() {
+            let ours = engine.config().module_version.as_str();
+            if version != ours {
+                // ix fork: name the ABI when either side is an ix build, so a
+                // stale cache is easy to recognize.
+                if version.contains("+ix") || ours.contains("+ix") {
+                    bail!(
+                        "Module was compiled with incompatible version '{version}': this \
+                         Wasmtime is '{ours}'; the ix fork ABI (vmctx layout, serialized \
+                         structs, ix feature set or sources) differs, recompile the module"
+                    );
+                }
                 bail!("Module was compiled with incompatible version '{version}'");
             }
         }
     }
-    postcard::from_bytes::<Metadata<'_>>(data)?.check_compatible(engine)
+    let metadata = postcard::from_bytes::<Metadata<'_>>(data).map_err(|e| {
+        format_err!(
+            "failed to read the artifact's engine metadata ({e}); it was probably built \
+             by a different Wasmtime or ix fork ABI (this build's is {}.{}), recompile \
+             the module",
+            wasmtime_environ::IX_INTRINSICS_ABI,
+            wasmtime_environ::IX_ABI_TAG
+        )
+    })?;
+    metadata.check_compatible(engine)
 }
 
 #[cfg(any(feature = "cranelift", feature = "winch"))]
@@ -192,6 +211,9 @@ pub struct Metadata<'a> {
     /// well. Last, so an artifact without it fails to parse rather than
     /// misparse.
     ix_abi: u32,
+    /// ix fork: `wasmtime_environ::IX_ABI_HASH`, the layout, feature and
+    /// source fingerprint next to the semantic number above. Checked with it.
+    ix_abi_hash: u64,
 }
 
 impl Metadata<'_> {
@@ -205,6 +227,7 @@ impl Metadata<'_> {
             tunables: engine.tunables().clone(),
             features: engine.features().bits(),
             ix_abi: wasmtime_environ::IX_INTRINSICS_ABI,
+            ix_abi_hash: wasmtime_environ::IX_ABI_HASH,
         })
     }
 
@@ -224,6 +247,17 @@ impl Metadata<'_> {
                 "Module was compiled for ix fork ABI {}, but this runtime is ABI {}",
                 self.ix_abi,
                 wasmtime_environ::IX_INTRINSICS_ABI
+            );
+        }
+        if self.ix_abi_hash != wasmtime_environ::IX_ABI_HASH {
+            bail!(
+                "Module was compiled with ix fork ABI {}.{:016x}, this build's is {}.{}: \
+                 the vmctx layout, serialized structs, ix feature set or sources differ, \
+                 recompile the module",
+                self.ix_abi,
+                self.ix_abi_hash,
+                wasmtime_environ::IX_INTRINSICS_ABI,
+                wasmtime_environ::IX_ABI_TAG
             );
         }
         Ok(())
@@ -554,6 +588,12 @@ mod test {
         let engine = Engine::default();
         let mut metadata = Metadata::new(&engine)?;
         metadata.ix_abi = wasmtime_environ::IX_INTRINSICS_ABI - 1;
+        let err = metadata.check_compatible(&engine).unwrap_err();
+        assert!(err.to_string().contains("ix fork ABI"), "{err}");
+
+        // Same number, other layout/feature/source fingerprint.
+        let mut metadata = Metadata::new(&engine)?;
+        metadata.ix_abi_hash ^= 1;
         let err = metadata.check_compatible(&engine).unwrap_err();
         assert!(err.to_string().contains("ix fork ABI"), "{err}");
         Ok(())

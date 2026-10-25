@@ -28,6 +28,13 @@ macro_rules! define_tunables {
             )*
         }
 
+        impl $tunables {
+            /// ix fork: the field list, for the artifact ABI hash
+            /// (`IX_ABI_HASH`): the metadata of every artifact serializes it.
+            #[doc(hidden)]
+            pub const IX_FIELDS: &'static str = stringify!($($field: $field_ty,)*);
+        }
+
         /// Optional tunable configuration options used in `wasmtime::Config`
         #[derive(Default, Clone)]
         #[expect(missing_docs, reason = "macro-generated fields")]
