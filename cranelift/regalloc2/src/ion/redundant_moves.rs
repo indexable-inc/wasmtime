@@ -326,14 +326,16 @@ mod tests {
             assert_eq!(
                 rm.process_move(reg(0), slot(i), Some(v)).elide,
                 tracked,
-                "slot {i}"
+                "slot {}",
+                i
             );
         }
         rm.clear_alloc(reg(0));
         for i in 0..n {
             assert!(
                 !rm.process_move(reg(0), slot(i), Some(v)).elide,
-                "slot {i} after write"
+                "slot {} after write",
+                i
             );
         }
     }
