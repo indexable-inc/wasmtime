@@ -20,6 +20,11 @@ pub struct RedundantMoveAction {
 }
 
 impl RedundantMoveEliminator {
+    /// The most copies tracked for one source allocation. Past it a new
+    /// copy is not tracked, which bounds the linear scans of a copy list
+    /// in `unlink` (one per tracked move).
+    pub const MAX_COPIES: usize = 64;
+
     pub fn process_move(
         &mut self,
         from: Allocation,
@@ -94,11 +99,28 @@ impl RedundantMoveEliminator {
             // An elided move keeps `to`'s old mapping until here: move
             // it off its old source's list before linking it to `from`.
             self.unlink(to);
-            self.allocs
-                .insert(to, RedundantMoveState::Copy(from, dst_vreg));
-            let copies = self.reverse_allocs.entry(from).or_insert_with(|| smallvec![]);
-            if !copies.contains(&to) {
+            let copies = self
+                .reverse_allocs
+                .entry(from)
+                .or_insert_with(|| smallvec![]);
+            // `to` is on a copy list only while its state is `Copy` of
+            // that list's owner, and `unlink` just took it off.
+            debug_assert!(!copies.contains(&to));
+            if copies.len() < Self::MAX_COPIES {
                 copies.push(to);
+                self.allocs
+                    .insert(to, RedundantMoveState::Copy(from, dst_vreg));
+            } else {
+                // Too many copies of `from` already: forget `to` rather
+                // than grow the list, so `unlink`'s scan stays bounded.
+                // An untracked allocation only loses elisions.
+                trace!(
+                    "     -> {} has {} copies, not tracking {}",
+                    from,
+                    copies.len(),
+                    to
+                );
+                self.allocs.remove(&to);
             }
         }
 
@@ -190,10 +212,13 @@ impl BlockExitStates {
     pub const WINDOW: usize = 64;
 
     /// Whether `succ` of `block` would start from `block`'s exit state.
-    pub fn inherits(block: Block, succ: Block, succ_preds: usize) -> bool {
+    /// The entry block never does: it has an implicit extra predecessor
+    /// (the function's caller) besides any listed one.
+    pub fn inherits(block: Block, succ: Block, succ_preds: usize, entry: Block) -> bool {
         succ.index() > block.index()
             && succ.index() - block.index() <= Self::WINDOW
             && succ_preds == 1
+            && succ != entry
     }
 
     /// Save `state` as `block`'s exit state for `consumers` later blocks.
@@ -279,6 +304,38 @@ mod tests {
         rm.process_move(reg(2), reg(1), Some(v));
         rm.clear_alloc(slot(0));
         assert!(rm.process_move(reg(2), reg(1), Some(v)).elide);
+    }
+
+    /// One source copied to many allocations: past `MAX_COPIES` new copies
+    /// are not tracked (so never elided), and writing the source still
+    /// forgets every tracked one.
+    #[test]
+    fn copy_list_is_capped() {
+        let mut rm = RedundantMoveEliminator::default();
+        let v = VReg::new(1, RegClass::Int);
+        let n = 3 * RedundantMoveEliminator::MAX_COPIES;
+        for i in 0..n {
+            assert!(!rm.process_move(reg(0), slot(i), Some(v)).elide);
+        }
+        assert!(rm
+            .reverse_allocs
+            .values()
+            .all(|c| c.len() <= RedundantMoveEliminator::MAX_COPIES));
+        for i in 0..n {
+            let tracked = i < RedundantMoveEliminator::MAX_COPIES;
+            assert_eq!(
+                rm.process_move(reg(0), slot(i), Some(v)).elide,
+                tracked,
+                "slot {i}"
+            );
+        }
+        rm.clear_alloc(reg(0));
+        for i in 0..n {
+            assert!(
+                !rm.process_move(reg(0), slot(i), Some(v)).elide,
+                "slot {i} after write"
+            );
+        }
     }
 
     /// A chain of blocks each saving its exit state for the next: states

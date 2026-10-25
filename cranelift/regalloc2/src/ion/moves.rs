@@ -861,20 +861,25 @@ impl<'a, F: Function> Env<'a, F> {
                              block: Block,
                              state: &RedundantMoveEliminator,
                              saved: &mut BlockExitStates| {
-                let succs = this.func.block_succs(block);
-                let consumers = succs
-                    .iter()
-                    .enumerate()
-                    .filter(|&(i, &succ)| {
-                        !succs[..i].contains(&succ)
-                            && BlockExitStates::inherits(
-                                block,
-                                succ,
-                                this.func.block_preds(succ).len(),
-                            )
-                    })
-                    .count();
-                saved.save(block, state, consumers as u32);
+                // Count distinct inheriting successors. Check `inherits`
+                // first: it is O(1), and an inheriting successor is at
+                // most `WINDOW` (64) blocks later, so a 64-bit mask over
+                // `succ - block - 1` dedups in O(1) too. A wide
+                // `br_table` thus costs O(successors), not O(successors^2).
+                const _: () = assert!(BlockExitStates::WINDOW <= 64);
+                let entry = this.func.entry_block();
+                let mut seen: u64 = 0;
+                for &succ in this.func.block_succs(block) {
+                    if BlockExitStates::inherits(
+                        block,
+                        succ,
+                        this.func.block_preds(succ).len(),
+                        entry,
+                    ) {
+                        seen |= 1u64 << (succ.index() - block.index() - 1);
+                    }
+                }
+                saved.save(block, state, seen.count_ones());
             };
             let from_end = this.func.block_insns(from_block).last().next();
             redundant_move_apply_insts(
@@ -887,7 +892,9 @@ impl<'a, F: Function> Env<'a, F> {
                 let block = Block::new(b);
                 let preds = this.func.block_preds(block);
                 match (preds.len(), preds.first()) {
-                    (1, Some(&pred)) if BlockExitStates::inherits(pred, block, 1) => {
+                    (1, Some(&pred))
+                        if BlockExitStates::inherits(pred, block, 1, this.func.entry_block()) =>
+                    {
                         match block_exit_states.take(pred) {
                             Some(state) => *redundant_moves = state,
                             None => redundant_moves.clear(),
