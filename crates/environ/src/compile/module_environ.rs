@@ -282,6 +282,14 @@ pub struct ModuleTranslation<'data> {
     /// This is held here in an `Unprocessed` form during translation, and then
     /// this is later finished with [`ModuleTranslation::finalize_memory_init`].
     pub memory_init: MemoryInit<'data>,
+
+    /// ix fork: tables some function body may write (`Tunables::ix_table_devirt`).
+    pub ix_table_writes: crate::IxTableWrites,
+
+    /// ix fork: for each defined table, its contents if the module can never
+    /// change them (see `ix_tables.rs`), indexed by `DefinedTableIndex`.
+    /// Empty unless `Tunables::ix_table_devirt` is on.
+    pub ix_static_tables: Vec<Option<crate::IxStaticTable>>,
 }
 
 /// Different forms of memory initialization that happens for a module.
@@ -349,6 +357,8 @@ impl<'data> ModuleTranslation<'data> {
             table_initialization: Default::default(),
             memory_init: MemoryInit::Unprocessed(Vec::new()),
             passive_data: Default::default(),
+            ix_table_writes: Default::default(),
+            ix_static_tables: Vec::new(),
         }
     }
 
@@ -889,6 +899,11 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                             locals: locals.into_boxed_slice(),
                             params: sig.params().into(),
                         });
+                }
+                // ix fork: note every table this body can write. (Off under
+                // guest debugging, where a debugger may touch any state.)
+                if self.tunables.ix_table_devirt && !self.tunables.debug_guest {
+                    self.result.ix_table_writes.scan(&body);
                 }
                 if self.tunables.debug_guest {
                     // All functions are potentially reachable and
@@ -1551,6 +1566,10 @@ impl ModuleTranslation<'_> {
     /// `Self::try_func_table_init` to attempt to optimize initialization of
     /// tables into static precomputed images.
     pub fn finalize_table_init(&mut self, tunables: &Tunables, types: &mut ModuleTypesBuilder) {
+        // ix fork: before the initializers are rewritten below.
+        if tunables.ix_table_devirt && !tunables.debug_guest {
+            self.ix_compute_static_tables();
+        }
         if tunables.table_lazy_init {
             self.try_func_table_init();
         }

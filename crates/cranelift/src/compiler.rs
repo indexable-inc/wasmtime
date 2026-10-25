@@ -595,6 +595,17 @@ impl wasmtime_environ::Compiler for Compiler {
 
         let needs_gc_heap = func_env.needs_gc_heap();
 
+        // ix fork: a function with no wasm-level calls may skip its prologue
+        // stack check if its frame fits in the slack the runtime holds back
+        // below the limit (`Config::ix_leaf_stack_slack`). Cranelift decides
+        // on the final frame size; here we only vouch for the calls.
+        if self.tunables.ix_leaf_stack_slack > 0
+            && context.func.stack_limit.is_some()
+            && !func_env.ix_made_wasm_call
+        {
+            context.func.stack_limit_leaf_slack = self.tunables.ix_leaf_stack_slack;
+        }
+
         if let Some((_, slot_builder)) = func_env.state_slot {
             compiler.cx.debug_slot_descriptor = Some(slot_builder);
         }

@@ -207,6 +207,20 @@ pub struct FunctionStencil {
     /// ensure that a trap happens if the stack pointer goes below the
     /// threshold specified here.
     pub stack_limit: Option<ir::GlobalValue>,
+
+    /// Bytes below `stack_limit` that the embedder guarantees are mapped and
+    /// unused, for this function only (ix fork; 0 = upstream behaviour).
+    ///
+    /// When this is nonzero and the function's whole frame (clobbers, spill
+    /// slots, outgoing arguments and, if it makes calls, the callee setup
+    /// area) is at most this many bytes, the prologue stack-limit check is
+    /// omitted. The embedder may set it only for functions that call no code
+    /// which relies on its caller having checked the limit: in Wasmtime that
+    /// means no wasm-level calls at all, only runtime builtins and libcalls,
+    /// which run on the host's headroom and never consult the limit. Such a
+    /// function stays at most this many bytes below the limit, so the
+    /// embedder must keep that many bytes of its stack budget in reserve.
+    pub stack_limit_leaf_slack: u32,
 }
 
 impl FunctionStencil {
@@ -220,6 +234,7 @@ impl FunctionStencil {
         self.srclocs.clear();
         self.debug_tags.clear();
         self.stack_limit = None;
+        self.stack_limit_leaf_slack = 0;
     }
 
     /// Create a `ReplaceBuilder` that will replace `inst` with a new
@@ -419,6 +434,7 @@ impl Function {
                 layout: Layout::new(),
                 srclocs: SecondaryMap::new(),
                 stack_limit: None,
+                stack_limit_leaf_slack: 0,
                 debug_tags: DebugTags::default(),
             },
             params: FunctionParameters::new(),
