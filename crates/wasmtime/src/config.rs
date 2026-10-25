@@ -116,9 +116,11 @@ impl core::hash::Hash for ModuleVersionStrategy {
     }
 }
 
-/// ix fork: `<major>+ix<N>.`, `N` from `ix_intrinsics_abi!`.
+/// ix fork: `<version>+ix<N>.`, `N` from `ix_intrinsics_abi!`. The full
+/// package version, not just the major: a patch release can change code
+/// generation too.
 const IX_VERSION_PREFIX: &str = concat!(
-    env!("CARGO_PKG_VERSION_MAJOR"),
+    env!("CARGO_PKG_VERSION"),
     "+ix",
     wasmtime_environ::ix_intrinsics_abi!(),
     "."
@@ -142,7 +144,7 @@ const IX_VERSION_BYTES: [u8; IX_VERSION_LEN] = {
     out
 };
 
-/// ix fork: the default artifact version string, `<major>+ix<N>.<tag>`:
+/// ix fork: the default artifact version string, `<version>+ix<N>.<tag>`:
 /// `N` is the semantic fork ABI (`ix_intrinsics_abi!`), `tag` is
 /// `wasmtime_environ::IX_ABI_TAG`, the layout/feature/source fingerprint.
 pub(crate) const IX_MODULE_VERSION: &str = match core::str::from_utf8(&IX_VERSION_BYTES) {

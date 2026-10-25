@@ -1119,12 +1119,28 @@ impl InliningCompiler for Compiler {
 
 struct CraneliftCacheStore(Arc<dyn CacheStore>);
 
+impl CraneliftCacheStore {
+    /// ix fork: Cranelift's own cache key covers its `VERSION` (package
+    /// version plus git revision when built from a git checkout), which
+    /// misses uncommitted or vendored source changes. Prefix every key with
+    /// the artifact ABI tag, which hashes all of the code generator's
+    /// sources, so a compiler fix never reuses a cached function body.
+    fn key(key: &[u8]) -> Vec<u8> {
+        let tag = wasmtime_environ::IX_ABI_TAG.as_bytes();
+        let mut k = Vec::with_capacity(tag.len() + 1 + key.len());
+        k.extend_from_slice(tag);
+        k.push(0xff);
+        k.extend_from_slice(key);
+        k
+    }
+}
+
 impl cranelift_codegen::incremental_cache::CacheKvStore for CraneliftCacheStore {
     fn get(&self, key: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
-        self.0.get(key)
+        self.0.get(&Self::key(key))
     }
     fn insert(&mut self, key: &[u8], val: Vec<u8>) {
-        self.0.insert(key, val);
+        self.0.insert(&Self::key(key), val);
     }
 }
 

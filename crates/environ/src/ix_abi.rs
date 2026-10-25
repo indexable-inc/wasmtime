@@ -17,10 +17,14 @@
 //!   (`Module` and every ix struct in it), via [`ix_abi_struct!`];
 //! * [`IX_FEATURES`]: one `(name, version)` line per ix feature that changes
 //!   generated code or serialized data without changing any of the above;
-//! * the contents of the fork's own compiler and runtime source files
-//!   (`IX_SOURCES` in `build.rs`), so a fix to what the generated code or a
-//!   proof means (which tables are static, what a poll does) is a new ABI
-//!   even when no layout or feature number changes.
+//! * the contents of every source that can change generated code: all
+//!   `.rs` and `.isle` files under Cranelift's codegen (and its meta
+//!   crate), the x64 assembler, `wasmtime-cranelift` and this crate, plus
+//!   the runtime halves of fork features (`IX_SOURCE_TREES` and
+//!   `IX_SOURCE_FILES` in `build.rs`), and the full package version, so a
+//!   fix to what the generated code or a proof means (which tables are
+//!   static, what a poll does) is a new ABI even when no layout or feature
+//!   number changes.
 //!
 //! So a layout change can't be forgotten (the hash follows the source), and
 //! merging two branches that each add a feature line or a field gives a
@@ -82,9 +86,10 @@ macro_rules! ix_abi_struct {
 ///
 /// * a new feature adds one line here (keep the list sorted by name; a merge
 ///   keeps every line from both sides);
-/// * a feature lists the source files its codegen and proofs live in in
-///   `IX_SOURCES` (`crates/environ/build.rs`), so editing them changes the
-///   hash with no manual step;
+/// * a feature's codegen and proofs must live under one of the hashed
+///   trees, or its files are added to `IX_SOURCE_FILES`
+///   (`crates/environ/build.rs`), so editing them changes the hash with no
+///   manual step;
 /// * a change to a feature's generated code, or to the meaning of its
 ///   serialized data, bumps that feature's number;
 /// * a new or changed serialized field is picked up automatically when the
@@ -93,7 +98,7 @@ macro_rules! ix_abi_struct {
 ///   `for_each_vmctx_type!` with no edit here.
 pub const IX_FEATURES: &[(&str, u32)] = &[
     // `ix_leaf_stack_slack`, `ix_table_devirt`; their codegen and the
-    // static-table proof are in `IX_SOURCES`.
+    // static-table proof are in the hashed sources.
     ("check-trim", 1),
     // The `ix` intrinsics module; `IX_INTRINSICS_ABI`.
     ("intrinsics", crate::IX_INTRINSICS_ABI),
@@ -218,5 +223,14 @@ mod tests {
         assert!(Module::IX_SCHEMA.contains("ix_intrinsics"));
         assert!(Tunables::IX_FIELDS.contains("table_lazy_init"));
         assert_eq!(IX_ABI_TAG.len(), 16);
+    }
+
+    #[test]
+    fn source_hash_covers_the_trees() {
+        // The build script walks whole trees; a broken walk (a renamed root,
+        // an extension filter that matches nothing) would hash a handful of
+        // files and still build. There are several hundred.
+        let n: usize = env!("IX_SOURCES_COUNT").parse().unwrap();
+        assert!(n > 300, "IX_SOURCES_HASH covers only {n} files");
     }
 }
