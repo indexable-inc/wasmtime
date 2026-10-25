@@ -19,7 +19,8 @@
 //!   generated code or serialized data without changing any of the above;
 //! * the contents of every source that can change generated code: all
 //!   `.rs` and `.isle` files under Cranelift's codegen (and its meta
-//!   crate), the x64 assembler, `wasmtime-cranelift` and this crate, plus
+//!   crate), the x64 assembler, Winch's codegen, `wasmtime-cranelift` and
+//!   this crate, plus
 //!   the runtime halves of fork features (`IX_SOURCE_TREES` and
 //!   `IX_SOURCE_FILES` in `build.rs`), and the full package version, so a
 //!   fix to what the generated code or a proof means (which tables are

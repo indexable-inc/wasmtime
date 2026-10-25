@@ -22,11 +22,13 @@ use std::path::{Path, PathBuf};
 /// Directories, relative to this crate, whose `.rs` and `.isle` files are
 /// hashed recursively: Cranelift's code generator (with its ISLE rules and
 /// the meta crates that generate instruction definitions), the x64
-/// assembler, the Wasm-to-CLIF translator, and this crate.
+/// assembler, Winch's code generator, the Wasm-to-CLIF translator, and this
+/// crate.
 const IX_SOURCE_TREES: &[&str] = &[
     "../../cranelift/assembler-x64",
     "../../cranelift/codegen/meta/src",
     "../../cranelift/codegen/src",
+    "../../winch/codegen/src",
     "../cranelift/src",
     "src",
 ];
