@@ -404,9 +404,9 @@ wasmtime_option_group! {
         /// Yield when a global epoch counter changes, allowing for async
         /// operation without blocking the executor.
         pub epoch_interruption: Option<bool>,
-        /// Interrupt with a per-store poll page instead of epochs (ix fork):
-        /// one load at each function entry and loop header, which faults once
-        /// the host revokes the page.
+        /// Interrupt with a per-store poll word instead of epochs (ix fork):
+        /// one load and branch at each function entry and loop header, which
+        /// traps once the host sets the word.
         pub poll_interruption: Option<bool>,
         /// Maximum stack size, in bytes, that wasm is allowed to consume before a
         /// stack overflow is reported.

@@ -223,6 +223,7 @@ impl MemFlagsData {
                 self.with_endianness(Endianness::Big)
             }
             "can_move" => self.with_can_move(),
+            "volatile" => self.with_volatile(),
 
             other => match TrapCode::from_str(other) {
                 Ok(code) => self.with_trap_code(Some(code)),
@@ -360,6 +361,25 @@ impl MemFlagsData {
         self.flags = self.flags.with_readonly();
         self
     }
+    /// Test if the `volatile` flag is set.
+    ///
+    /// A volatile load is performed every time control reaches it, and its
+    /// value is never assumed: alias analysis neither replaces it with an
+    /// earlier load or store of the same location nor forwards its result to
+    /// a later load, it is never moved, and it is never deleted, even when its
+    /// result is unused. It is not a fence: other accesses may still be
+    /// optimized across it. Useful for polling a word that another thread
+    /// writes, such as an interrupt flag.
+    pub const fn volatile(self) -> bool {
+        self.flags.volatile()
+    }
+
+    /// Set the `volatile` flag, returning new flags.
+    pub const fn with_volatile(mut self) -> Self {
+        self.flags = self.flags.with_volatile();
+        self
+    }
+
     /// Get the trap code to report if this memory access traps.
     ///
     /// A `None` trap code indicates that this memory access does not trap.

@@ -548,8 +548,8 @@ impl Instance {
         unsafe { self.vmctx_plus_offset_mut(offset) }
     }
 
-    /// Return a pointer to the store's poll page (ix fork, poll-page
-    /// interruption).
+    /// Return a pointer to the vmctx field holding the store's poll word
+    /// (ix fork, poll interruption).
     pub fn poll_ptr(self: Pin<&mut Self>) -> &mut Option<VmPtr<AtomicU64>> {
         let offset = self.offsets().ptr.vmctx().poll_ptr();
         unsafe { self.vmctx_plus_offset_mut(offset) }

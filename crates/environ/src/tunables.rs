@@ -209,9 +209,10 @@ define_tunables! {
         /// mark cold blocks during compilation.
         pub branch_hinting: bool,
 
-        /// Whether or not we use poll-page interruption: every loop header and
-        /// function entry loads from a per-store poll page, and the host
-        /// interrupts by making that page inaccessible (ix fork). Kept last
+        /// Whether or not we use poll interruption: every loop header and
+        /// function entry loads a per-store poll word and traps if it is
+        /// nonzero, and the host interrupts by storing 1 into it (ix fork).
+        /// Kept last
         /// so the fork's fields stay after upstream's.
         pub poll_interruption: bool,
     }

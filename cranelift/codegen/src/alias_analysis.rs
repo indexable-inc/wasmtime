@@ -1350,6 +1350,16 @@ impl<'a> AliasAnalysis<'a> {
                 );
 
                 OptResult::None
+            } else if opcode.can_load()
+                && func.dfg.insts[inst]
+                    .memflags_data(&func.dfg)
+                    .is_some_and(|f| f.volatile())
+            {
+                // A volatile load reads whatever memory holds right now: never
+                // replace it with a known value, and never offer its result
+                // to a later load.
+                trace!("  volatile load: not a candidate for RLE");
+                OptResult::None
             } else if opcode.can_load() {
                 let last_store = state.stores.get_last_store(func, inst);
                 let load_result = func.dfg.inst_results(inst)[0];

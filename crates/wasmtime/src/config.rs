@@ -125,8 +125,10 @@ impl ModuleVersionStrategy {
             // the `ix` intrinsics and the fork's vmctx layout. 2 added the
             // vmctx `poll_ptr` field (poll-page interruption), which moved
             // every field after `epoch_ptr`, so an `ix1` artifact must not
-            // load.
-            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix2"),
+            // load. 3 changed what a poll does with that pointer (test a
+            // word, not fault on a page): an `ix2` artifact would never be
+            // interrupted.
+            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix3"),
             Self::Custom(c) => c,
             Self::None => "",
         }
@@ -800,22 +802,22 @@ impl Config {
         self
     }
 
-    /// Interrupt wasm with a poll page instead of an epoch comparison (ix
-    /// fork).
+    /// Interrupt wasm with a per-store poll word instead of an epoch
+    /// comparison (ix fork).
     ///
-    /// Compiled code loads one word from a per-[`Store`](crate::Store) poll
-    /// page at every function entry and loop header, at the same places an
-    /// epoch check would go, with no compare and no branch. To interrupt, the
-    /// host makes the page inaccessible with
-    /// [`InterruptHandle::interrupt`](crate::InterruptHandle::interrupt),
-    /// from any thread. The next poll faults, and the signal handler turns
-    /// that fault into [`Trap::Interrupt`](crate::Trap::Interrupt), which
-    /// unwinds to the host like any other trap. There is no resume: an
+    /// Compiled code loads one word from its [`Store`](crate::Store)'s poll
+    /// cell at every function entry and loop header (the places an epoch
+    /// check would go) and traps if it is nonzero: one load and one fused
+    /// test-and-branch, against the epoch check's two loads and compare. To
+    /// interrupt, the host calls
+    /// [`InterruptHandle::interrupt`](crate::InterruptHandle::interrupt)
+    /// from any thread: one atomic store, no syscall and no TLB shootdown.
+    /// The next poll traps with [`Trap::Interrupt`](crate::Trap::Interrupt),
+    /// which unwinds to the host like any other trap. There is no resume: an
     /// interrupted call has trapped. Get the handle from
     /// [`Store::interrupt_handle`](crate::Store::interrupt_handle), and
-    /// re-arm the page with
-    /// [`InterruptHandle::rearm`](crate::InterruptHandle::rearm) before the
-    /// store runs wasm again.
+    /// re-arm with [`InterruptHandle::rearm`](crate::InterruptHandle::rearm)
+    /// before the store runs wasm again.
     ///
     /// Requires signals-based traps and a unix host, and cannot be combined
     /// with [`Config::epoch_interruption`]. Not supported by Winch or Pulley.
@@ -2950,25 +2952,23 @@ impl Config {
 
         if tunables.poll_interruption {
             if !cfg!(all(unix, feature = "std")) {
-                bail!("poll-page interruption is only supported on unix hosts with `std`");
+                bail!("poll interruption is only supported on unix hosts with `std`");
             }
             if !tunables.signals_based_traps {
-                bail!("poll-page interruption requires signals-based traps");
+                bail!("poll interruption requires signals-based traps");
             }
             if tunables.epoch_interruption {
-                bail!("poll-page interruption and epoch interruption cannot both be enabled");
+                bail!("poll interruption and epoch interruption cannot both be enabled");
             }
             if tunables.winch_callable || self.compiler_target().is_pulley() {
-                bail!("poll-page interruption is only implemented for native Cranelift");
+                bail!("poll interruption is only implemented for native Cranelift");
             }
-            // Only backends whose `atomic_load` lowering keeps the load's trap
-            // code are allowed: a poll without it would fault with no trap
-            // metadata and crash the process instead of trapping. riscv64
-            // (and s390x) drop the trap code when lowering atomic loads.
+            // Only the backends whose poll codegen and trap attribution are
+            // tested (fork poll tests, wast with polls on, disas goldens).
             match self.compiler_target().architecture {
                 target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_) => {}
                 other => bail!(
-                    "poll-page interruption is only supported on x86_64 and aarch64, not {other}"
+                    "poll interruption is only supported on x86_64 and aarch64, not {other}"
                 ),
             }
         }

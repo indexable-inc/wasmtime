@@ -385,7 +385,7 @@ impl Metadata<'_> {
         Self::check_bool(
             poll_interruption,
             other.poll_interruption,
-            "poll-page interruption",
+            "poll interruption",
         )?;
         Self::check_bool(memory_may_move, other.memory_may_move, "memory may move")?;
         Self::check_bool(

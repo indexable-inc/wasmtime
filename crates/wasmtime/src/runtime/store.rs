@@ -463,10 +463,10 @@ pub struct StoreOpaque {
     engine: Engine,
     vm_store_context: VMStoreContext,
 
-    /// The poll page compiled code reads under poll-page interruption (ix
-    /// fork); `None` when `Config::poll_interruption` is off.
+    /// The poll cell compiled code reads under poll interruption (ix fork);
+    /// `None` when `Config::poll_interruption` is off.
     #[cfg(all(unix, feature = "std"))]
-    poll_page: Option<crate::InterruptHandle>,
+    poll_cell: Option<crate::InterruptHandle>,
 
     // Contains all continuations ever allocated throughout the lifetime of this
     // store.
@@ -734,8 +734,8 @@ impl<T> Store<T> {
             engine: engine.clone(),
             vm_store_context: Default::default(),
             #[cfg(all(unix, feature = "std"))]
-            poll_page: if engine.tunables().poll_interruption {
-                Some(crate::InterruptHandle::new()?)
+            poll_cell: if engine.tunables().poll_interruption {
+                Some(crate::InterruptHandle::new())
             } else {
                 None
             },
@@ -1098,7 +1098,7 @@ impl<T> Store<T> {
 
     /// The handle that interrupts this store's wasm from any thread, when
     /// [`Config::poll_interruption`](crate::Config::poll_interruption) is on;
-    /// `None` otherwise. Every call returns a handle to the same poll page.
+    /// `None` otherwise. Every call returns a handle to the same poll cell.
     #[cfg(all(unix, feature = "std"))]
     pub fn interrupt_handle(&self) -> Option<crate::InterruptHandle> {
         self.inner.interrupt_handle()
@@ -1547,19 +1547,19 @@ impl StoreOpaque {
     /// The pointer to write into each instance's vmctx `poll_ptr`.
     pub(crate) fn poll_ptr(&self) -> Option<NonNull<core::sync::atomic::AtomicU64>> {
         #[cfg(all(unix, feature = "std"))]
-        if let Some(p) = &self.poll_page {
+        if let Some(p) = &self.poll_cell {
             return Some(p.poll_ptr());
         }
         None
     }
 
-    /// Whether `addr` is in this store's poll page.
-    pub(crate) fn poll_page_contains(&self, addr: usize) -> bool {
+    /// Whether this store has a poll cell and it is interrupted: the only
+    /// state in which its compiled code can raise `Trap::Interrupt`.
+    pub(crate) fn poll_interrupt_pending(&self) -> bool {
         #[cfg(all(unix, feature = "std"))]
-        if let Some(p) = &self.poll_page {
-            return p.contains(addr);
+        if let Some(p) = &self.poll_cell {
+            return p.is_interrupted();
         }
-        let _ = addr;
         false
     }
 
@@ -1567,7 +1567,7 @@ impl StoreOpaque {
     /// `Config::poll_interruption` is on.
     #[cfg(all(unix, feature = "std"))]
     pub(crate) fn interrupt_handle(&self) -> Option<crate::InterruptHandle> {
-        self.poll_page.clone()
+        self.poll_cell.clone()
     }
 
     pub fn id(&self) -> StoreId {

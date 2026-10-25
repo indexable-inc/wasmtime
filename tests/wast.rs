@@ -107,7 +107,7 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
     wasmtime_test_util::wasmtime_wast::apply_test_config(&mut cfg, &test_config);
     wasmtime_test_util::wasmtime_wast::apply_wast_config(&mut cfg, &config);
 
-    // ix fork: run the suite with poll-page interruption compiled in (a poll
+    // ix fork: run the suite with poll interruption compiled in (a poll
     // at every function entry and loop header), to check that polls change
     // no result. Native Cranelift only; Pulley and Winch reject it.
     if std::env::var("WASMTIME_TEST_POLL_INTERRUPTION").is_ok()

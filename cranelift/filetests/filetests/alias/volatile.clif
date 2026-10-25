@@ -1,0 +1,21 @@
+test alias-analysis
+set opt_level=speed
+target x86_64
+target aarch64
+
+;; A volatile load (ix fork, the poll interruption poll) is never merged
+;; with an earlier load of the same address, and is no fence: a plain load
+;; after it still reuses the plain load before it.
+
+function %volatile(i64) -> i64, i64, i64 {
+block0(v0: i64):
+    v1 = load.i64 notrap aligned v0
+    v2 = load.i64 notrap aligned volatile v0
+    v3 = load.i64 notrap aligned volatile v0
+    v4 = load.i64 notrap aligned v0
+    ; check: v1 = load.i64
+    ; nextln: v4 -> v1
+    ; nextln: v2 = load.i64 notrap aligned volatile v0
+    ; nextln: v3 = load.i64 notrap aligned volatile v0
+    return v2, v3, v4
+}

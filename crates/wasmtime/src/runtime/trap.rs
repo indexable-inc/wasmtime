@@ -77,22 +77,19 @@ use wasmtime_environ::{
 pub use wasmtime_environ::Trap;
 
 #[cold]
-fn poll_fault_mismatch(pc: usize, addr: Option<usize>, interrupt: bool, on_poll_page: bool) -> ! {
-    let addr = addr.unwrap_or(0);
+fn poll_trap_mismatch(pc: usize, addr: Option<usize>, pending: bool) -> ! {
     cfg_select! {
         feature = "std" => {
             eprintln!(
-                "Wasmtime caught a fault at pc {pc:#x}, address {addr:#x}: poll site = \
-                 {interrupt}, on the store's poll page = {on_poll_page}. A poll-page \
-                 fault must be both; this is a bug in Wasmtime."
+                "Wasmtime caught an interrupt trap at pc {pc:#x} (memory fault address \
+                 {addr:x?}, this store's poll word set = {pending}). A poll traps only \
+                 through its trap instruction, and only when its store was interrupted; \
+                 this is a bug in Wasmtime."
             );
             std::process::abort();
         }
         _ => {
-            panic!(
-                "poll-page fault mismatch at pc {pc:#x}, address {addr:#x} \
-                 ({interrupt}, {on_poll_page})"
-            );
+            panic!("poll trap mismatch at pc {pc:#x}, address {addr:x?} ({pending})");
         }
     }
 }
@@ -142,16 +139,20 @@ pub(crate) fn from_runtime_box(
             // and additionally translate it to a wasm-local address to be added
             // as context to the error.
             //
-            // Poll-page interruption (ix fork): a fault on the store's poll
-            // page must come from a poll site, whose trap code is
-            // `Interrupt`, and a fault at a poll site must be on the poll
-            // page. Anything else means compiled code and the runtime
-            // disagree, so abort rather than guess which one it was.
-            let interrupt = matches!(trap, CompiledTrap::Normal(Trap::Interrupt));
-            let on_poll_page = faulting_addr.is_some_and(|addr| store.poll_page_contains(addr));
-            if on_poll_page || (interrupt && faulting_addr.is_some()) {
-                if !(on_poll_page && interrupt) {
-                    poll_fault_mismatch(pc, faulting_addr, interrupt, on_poll_page);
+            // Poll interruption (ix fork): the only compiled code with the
+            // `Interrupt` trap code is a poll's trap instruction, reached
+            // when the poll read a nonzero word from this store's cell. So a
+            // jit `Interrupt` must have no faulting address (a trap
+            // instruction, not a memory fault) and this store's word must be
+            // set: only this thread rearms it, between calls. Anything else
+            // means compiled code and the runtime disagree, so abort rather
+            // than guess which one it was. A memory fault at a poll's load
+            // (always readable host memory) has no trap code, so it is not a
+            // wasm trap and crashes the process like any unknown fault.
+            if matches!(trap, CompiledTrap::Normal(Trap::Interrupt)) {
+                let pending = store.poll_interrupt_pending();
+                if faulting_addr.is_some() || !pending {
+                    poll_trap_mismatch(pc, faulting_addr, pending);
                 }
             } else if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
                 err = err.context(fault);

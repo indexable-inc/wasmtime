@@ -152,8 +152,8 @@ macro_rules! for_each_vmctx_type {
                         epoch_ptr: VmPtr<AtomicU64>
                     }
 
-                    // ix fork: the store's poll page, read at every function
-                    // entry and loop header under poll-page interruption.
+                    // ix fork: the store's poll word, read at every function
+                    // entry and loop header under poll interruption.
                     field {
                         #[readonly]
                         #[can_move]

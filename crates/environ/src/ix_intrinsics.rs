@@ -25,7 +25,11 @@ pub const IX_INTRINSIC_MODULE: &str = "ix";
 ///
 /// - 1: `ix` intrinsics.
 /// - 2: vmctx `poll_ptr` after `epoch_ptr` (poll-page interruption).
-pub const IX_INTRINSICS_ABI: u32 = 2;
+/// - 3: `poll_ptr` points at a poll word that compiled code tests (trap if
+///   nonzero) instead of a page whose load faults. An `ix2` artifact would
+///   still load against an `ix3` runtime but could never be interrupted, so
+///   it must not load.
+pub const IX_INTRINSICS_ABI: u32 = 3;
 
 macro_rules! intrinsics {
     ($($(#[$doc:meta])* $variant:ident $name:literal ($($p:ident),*) -> ($($r:ident),*);)*) => {

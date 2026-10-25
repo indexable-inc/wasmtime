@@ -849,26 +849,31 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         self.poll_check(builder);
     }
 
-    /// One load from the poll page: no compare, no branch. The host
-    /// interrupts by making the page inaccessible, and the resulting fault
-    /// at this PC carries `TRAP_INTERRUPT`, so it unwinds as
-    /// `Trap::Interrupt`.
+    /// One poll: load the store's poll word and trap with `TRAP_INTERRUPT`
+    /// if it is nonzero (`mov; test; jne` to a `ud2` on x86, `ldr; cbnz` to
+    /// a `udf` on aarch64). The host interrupts with one atomic store of 1
+    /// into the word, so nothing is remapped and there is no TLB shootdown.
     ///
-    /// It is an `atomic_load` on purpose. A plain load of the same address
-    /// would be merged with the previous poll by redundant-load elimination
-    /// whenever no store to its alias region sits between them (a loop with
-    /// no calls and no stores has none), which would remove the poll from
-    /// the loop. An atomic load is a memory fence to alias analysis, so every
-    /// poll stays, and it can't be dead-code eliminated or hoisted. On x86
-    /// it lowers to a plain `mov`.
+    /// The load is `volatile`: a plain load of the same address would be
+    /// merged with the previous poll by redundant-load elimination whenever
+    /// no store to its alias region sits between them (a loop with no calls
+    /// and no stores has none), which would remove the poll from the loop.
+    /// Volatile loads are never merged, hoisted or deleted, and, unlike an
+    /// `atomic_load`, are no fence: other regions keep their RLE state
+    /// across a poll, and aarch64 gets a plain `ldr`, not `ldar`. It is
+    /// `notrap`: the word is host memory that is always readable, so a fault
+    /// on it is a bug and aborts, and the only `TRAP_INTERRUPT` site is the
+    /// trap instruction.
     fn poll_check(&mut self, builder: &mut FunctionBuilder<'_>) {
-        let addr = builder.use_var(self.poll_ptr_var);
+        let cell = builder.use_var(self.poll_ptr_var);
         let region = self.alias_regions.vmctx().poll_word().region(builder.func);
         let flags = MemFlagsData::new()
             .with_aligned()
-            .with_alias_region(Some(region))
-            .with_trap_code(Some(TRAP_INTERRUPT));
-        builder.ins().atomic_load(I64, flags, addr);
+            .with_notrap()
+            .with_volatile()
+            .with_alias_region(Some(region));
+        let word = builder.ins().load(I64, flags, cell, 0);
+        self.trapnz(builder, word, TRAP_INTERRUPT);
     }
 
     fn hook_malloc_exit(&mut self, builder: &mut FunctionBuilder, retvals: &[ir::Value]) {
