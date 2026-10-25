@@ -2514,7 +2514,9 @@ impl<'a> Parser<'a> {
                     })?;
                     Ok(Expr { base, offset })
                 }
-                Some(Token::Integer(x)) if x.starts_with("-") => {
+                // The lexer reads `+N` right after a base (`v1+0x10`) as one
+                // signed integer, as it does `-N`.
+                Some(Token::Integer(x)) if x.starts_with('-') || x.starts_with('+') => {
                     let offset: i64 = self
                         .match_imm64("expected an imm64 range for offset in dynamic expression")?
                         .into();
