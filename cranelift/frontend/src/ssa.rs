@@ -861,6 +861,117 @@ mod tests {
         };
     }
 
+    /// Many variables and many blocks: the `widevars` compile-time DoS shape
+    /// (a long run of blocks, then many locals each set once), with diamonds
+    /// on the way that redefine one variable. The definition map must stay
+    /// linear in what the builder records; the old dense per-variable block
+    /// map held about variables x blocks entries here (12M), and 7.9 GB for
+    /// 49k locals after 32k blocks. Lookups through single-predecessor
+    /// chains and across joins must still find the right values.
+    #[test]
+    fn sparse_map_many_vars_many_blocks() {
+        const DIAMONDS: usize = 1000;
+        const VARS: usize = 4000;
+        use alloc::vec::Vec;
+        let mut func = Function::new();
+        let mut ssa = SSABuilder::default();
+        let x_var = Variable::new(0);
+
+        let entry = func.dfg.make_block();
+        FuncCursor::new(&mut func).insert_block(entry);
+        ssa.declare_block(entry);
+        ssa.seal_block(entry, &mut func);
+        let x0 = FuncCursor::new(&mut func)
+            .at_bottom(entry)
+            .ins()
+            .iconst(I32, 0);
+        ssa.def_var(x_var, x0, entry);
+
+        let mut head = entry;
+        let mut x_head = x0;
+        for i in 0..DIAMONDS {
+            let (left, right, join) = (
+                func.dfg.make_block(),
+                func.dfg.make_block(),
+                func.dfg.make_block(),
+            );
+            {
+                let mut cur = FuncCursor::new(&mut func);
+                cur.insert_block(left);
+                cur.insert_block(right);
+                cur.insert_block(join);
+            }
+            let c = ssa.use_var(&mut func, x_var, I32, head).0;
+            assert_eq!(c, x_head);
+            let br =
+                FuncCursor::new(&mut func)
+                    .at_bottom(head)
+                    .ins()
+                    .brif(c, left, &[], right, &[]);
+
+            // The left arm redefines x, the right arm does not.
+            ssa.declare_block(left);
+            ssa.declare_block_predecessor(left, br);
+            ssa.seal_block(left, &mut func);
+            let x_left = FuncCursor::new(&mut func)
+                .at_bottom(left)
+                .ins()
+                .iconst(I32, i as i64 + 1);
+            ssa.def_var(x_var, x_left, left);
+            let jump_left = FuncCursor::new(&mut func)
+                .at_bottom(left)
+                .ins()
+                .jump(join, &[]);
+
+            ssa.declare_block(right);
+            ssa.declare_block_predecessor(right, br);
+            ssa.seal_block(right, &mut func);
+            assert_eq!(ssa.use_var(&mut func, x_var, I32, right).0, x_head);
+            let jump_right = FuncCursor::new(&mut func)
+                .at_bottom(right)
+                .ins()
+                .jump(join, &[]);
+
+            // Two definitions reach the join, so x becomes its parameter.
+            ssa.declare_block(join);
+            ssa.declare_block_predecessor(join, jump_left);
+            ssa.declare_block_predecessor(join, jump_right);
+            ssa.seal_block(join, &mut func);
+            let x_join = ssa.use_var(&mut func, x_var, I32, join).0;
+            assert_eq!(func.dfg.block_params(join), &[x_join]);
+            head = join;
+            x_head = x_join;
+        }
+
+        // Many variables, each set once in the last block.
+        let mut defs = Vec::with_capacity(VARS);
+        for v in 1..=VARS {
+            let val = FuncCursor::new(&mut func)
+                .at_bottom(head)
+                .ins()
+                .iconst(I64, v as i64);
+            ssa.def_var(Variable::new(v), val, head);
+            defs.push(val);
+        }
+        for (v, &val) in (1..=VARS).zip(&defs) {
+            assert_eq!(ssa.use_var(&mut func, Variable::new(v), I64, head).0, val);
+        }
+        assert_eq!(ssa.use_var(&mut func, x_var, I32, head).0, x_head);
+        FuncCursor::new(&mut func)
+            .at_bottom(head)
+            .ins()
+            .return_(&[]);
+
+        let blocks = 1 + 3 * DIAMONDS;
+        let entries = ssa.variables.len();
+        assert!(
+            entries <= VARS + 1 + 4 * DIAMONDS,
+            "{entries} definition entries for {VARS} variables and {blocks} blocks"
+        );
+        let flags = settings::Flags::new(settings::builder());
+        verify_function(&func, &flags).expect("valid function");
+    }
+
     #[test]
     fn program_with_loop() {
         let mut func = Function::new();
