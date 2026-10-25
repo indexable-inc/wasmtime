@@ -375,6 +375,7 @@ impl Metadata<'_> {
             ix_leaf_stack_slack,
             ix_table_devirt,
             ix_unsafe_ci_nocheck,
+            ix_unsafe_no_stack_check,
             ix_static_call_indirect,
             ix_wasm_cc,
 
@@ -466,6 +467,11 @@ impl Metadata<'_> {
             ix_unsafe_ci_nocheck,
             other.ix_unsafe_ci_nocheck,
             "ix unsafe call_indirect nocheck",
+        )?;
+        Self::check_bool(
+            ix_unsafe_no_stack_check,
+            other.ix_unsafe_no_stack_check,
+            "ix unsafe no stack check",
         )?;
         Self::check_bool(
             ix_static_call_indirect,

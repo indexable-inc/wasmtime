@@ -255,6 +255,12 @@ define_tunables! {
         /// the module defines). Never for untrusted code.
         pub ix_unsafe_ci_nocheck: u32,
 
+        /// ix fork, UNSAFE, bench only: emit no prologue stack-limit check
+        /// at all, to measure its cost. Unbounded recursion then runs into
+        /// the thread's guard page and kills the process. Never for
+        /// untrusted code.
+        pub ix_unsafe_no_stack_check: bool,
+
         /// ix fork: lower `call_indirect` through a static table (see
         /// `ix_table_devirt`'s facts, from the module's own bytes) to a load
         /// from a per-type, read-only dispatch array shared by every
@@ -362,6 +368,7 @@ impl Tunables {
             ix_leaf_stack_slack: 0,
             ix_table_devirt: false,
             ix_unsafe_ci_nocheck: 0,
+            ix_unsafe_no_stack_check: false,
             ix_static_call_indirect: false,
             ix_wasm_cc: IxWasmCc::Standard,
         }

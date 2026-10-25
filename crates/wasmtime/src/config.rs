@@ -1045,6 +1045,21 @@ impl Config {
         self
     }
 
+    /// ix fork, UNSAFE, bench only: compile functions with no prologue
+    /// stack-limit check, to measure what the check costs. Deep recursion
+    /// then overflows into the thread's guard page and aborts the process.
+    ///
+    /// # Safety
+    ///
+    /// Only for modules known not to recurse deeply. Never for untrusted code.
+    ///
+    /// Only exists with the `ix-unsafe-bench` cargo feature (off by default).
+    #[cfg(feature = "ix-unsafe-bench")]
+    pub unsafe fn ix_unsafe_no_stack_check(&mut self, enable: bool) -> &mut Self {
+        self.tunables.ix_unsafe_no_stack_check = Some(enable);
+        self
+    }
+
     /// ix fork: integer argument registers of calls between wasm functions.
     ///
     /// Wasm functions call each other with Cranelift's `tail` calling

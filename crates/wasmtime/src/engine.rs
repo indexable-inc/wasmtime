@@ -518,6 +518,7 @@ information about this check\
             | "regalloc_checker"
             | "regalloc_verbose_logs"
             | "regalloc_algorithm"
+            | "regalloc_max_splits"
             | "is_pic"
             | "bb_padding_log2_minus_one"
             | "log2_min_function_alignment"

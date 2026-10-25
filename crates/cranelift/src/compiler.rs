@@ -565,7 +565,12 @@ impl wasmtime_environ::Compiler for Compiler {
         // abort for the whole program since the runtime limits configured by
         // the embedder should cause wasm to trap before it reaches that
         // (ensuring the host has enough space as well for its functionality).
-        if !isa.triple().is_pulley() {
+        // ix fork, UNSAFE bench-only ceiling (`Tunables::ix_unsafe_no_stack_check`).
+        #[cfg(feature = "ix-unsafe-bench")]
+        let no_check = self.tunables.ix_unsafe_no_stack_check;
+        #[cfg(not(feature = "ix-unsafe-bench"))]
+        let no_check = false;
+        if !isa.triple().is_pulley() && !no_check {
             let store_ctx = func_env
                 .alias_regions
                 .vmctx()
