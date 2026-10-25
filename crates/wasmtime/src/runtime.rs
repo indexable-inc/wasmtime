@@ -51,6 +51,8 @@ pub(crate) mod limits;
 pub(crate) mod linker;
 pub(crate) mod memory;
 pub(crate) mod module;
+#[cfg(all(unix, feature = "std"))]
+pub(crate) mod poll_interrupt;
 #[cfg(feature = "debug-builtins")]
 pub(crate) mod native_debug;
 pub(crate) mod resources;
@@ -101,6 +103,8 @@ pub use limits::*;
 pub use linker::*;
 pub use memory::*;
 pub use module::{Module, ModuleExport, ModuleFunction};
+#[cfg(all(unix, feature = "std"))]
+pub use poll_interrupt::InterruptHandle;
 pub use resources::*;
 #[cfg(all(feature = "async", feature = "call-hook"))]
 pub use store::CallHookHandler;

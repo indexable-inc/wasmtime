@@ -76,6 +76,27 @@ use wasmtime_environ::{
 /// ```
 pub use wasmtime_environ::Trap;
 
+#[cold]
+fn poll_fault_mismatch(pc: usize, addr: Option<usize>, interrupt: bool, on_poll_page: bool) -> ! {
+    let addr = addr.unwrap_or(0);
+    cfg_select! {
+        feature = "std" => {
+            eprintln!(
+                "Wasmtime caught a fault at pc {pc:#x}, address {addr:#x}: poll site = \
+                 {interrupt}, on the store's poll page = {on_poll_page}. A poll-page \
+                 fault must be both; this is a bug in Wasmtime."
+            );
+            std::process::abort();
+        }
+        _ => {
+            panic!(
+                "poll-page fault mismatch at pc {pc:#x}, address {addr:#x} \
+                 ({interrupt}, {on_poll_page})"
+            );
+        }
+    }
+}
+
 #[cold] // traps are exceptional, this helps move handling off the main path
 pub(crate) fn from_runtime_box(
     store: &mut StoreOpaque,
@@ -120,7 +141,19 @@ pub(crate) fn from_runtime_box(
             // then simultaneously assert that it's within a known linear memory
             // and additionally translate it to a wasm-local address to be added
             // as context to the error.
-            if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
+            //
+            // Poll-page interruption (ix fork): a fault on the store's poll
+            // page must come from a poll site, whose trap code is
+            // `Interrupt`, and a fault at a poll site must be on the poll
+            // page. Anything else means compiled code and the runtime
+            // disagree, so abort rather than guess which one it was.
+            let interrupt = matches!(trap, CompiledTrap::Normal(Trap::Interrupt));
+            let on_poll_page = faulting_addr.is_some_and(|addr| store.poll_page_contains(addr));
+            if on_poll_page || (interrupt && faulting_addr.is_some()) {
+                if !(on_poll_page && interrupt) {
+                    poll_fault_mismatch(pc, faulting_addr, interrupt, on_poll_page);
+                }
+            } else if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
                 err = err.context(fault);
             }
             (err, Some(pc))

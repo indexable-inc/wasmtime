@@ -91,6 +91,7 @@ pub const TRAP_CONTINUATION_ALREADY_CONSUMED: TrapCode =
     TrapCode::unwrap_user(Trap::ContinuationAlreadyConsumed as u8 + TRAP_OFFSET);
 pub const TRAP_CAST_FAILURE: TrapCode =
     TrapCode::unwrap_user(Trap::CastFailure as u8 + TRAP_OFFSET);
+pub const TRAP_INTERRUPT: TrapCode = TrapCode::unwrap_user(Trap::Interrupt as u8 + TRAP_OFFSET);
 pub const TRAP_UNCAUGHT_EXCEPTION: TrapCode =
     TrapCode::unwrap_user(Trap::UncaughtException as u8 + TRAP_OFFSET);
 

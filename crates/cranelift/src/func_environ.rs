@@ -10,7 +10,7 @@ use crate::translate::{
 use crate::trap::TranslateTrap;
 use crate::{
     BuiltinFunctionSignatures, Reachability, TRAP_ARRAY_OUT_OF_BOUNDS, TRAP_GC_HEAP_CORRUPT,
-    TRAP_TABLE_OUT_OF_BOUNDS,
+    TRAP_INTERRUPT, TRAP_TABLE_OUT_OF_BOUNDS,
 };
 use cranelift_codegen::cursor::FuncCursor;
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -231,6 +231,11 @@ pub struct FuncEnvironment<'module_environment> {
     /// spill, and this isn't any worse than reloading each time.
     epoch_ptr_var: cranelift_frontend::Variable,
 
+    /// A cached pointer to the per-Store poll page, when performing
+    /// poll-page interruption (ix fork). Loaded from the vmctx in the
+    /// function prologue and kept in a register like `epoch_ptr_var`.
+    poll_ptr_var: cranelift_frontend::Variable,
+
     fuel_consumed: i64,
 
     /// A stack limit for when signals-based traps are disabled.
@@ -314,6 +319,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             fuel_var: Variable::reserved_value(),
             epoch_deadline_var: Variable::reserved_value(),
             epoch_ptr_var: Variable::reserved_value(),
+            poll_ptr_var: Variable::reserved_value(),
 
             // Start with at least one fuel being consumed because even empty
             // functions should consume at least some fuel.
@@ -826,6 +832,43 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
         let continuation_block = builder.create_block();
         let cur_epoch_value = self.epoch_load_current(builder);
         self.epoch_check_full(builder, cur_epoch_value, continuation_block);
+    }
+
+    /// Poll-page interruption (ix fork): cache the store's poll-page pointer
+    /// and poll once, at the same place `epoch_function_entry` checks.
+    fn poll_function_entry(&mut self, builder: &mut FunctionBuilder<'_>) {
+        debug_assert!(self.poll_ptr_var.is_reserved_value());
+        self.poll_ptr_var = builder.declare_var(self.pointer_type());
+        let vmctx = self.vmctx_val(&mut builder.cursor());
+        let poll_ptr = self
+            .alias_regions
+            .vmctx()
+            .poll_ptr()
+            .load(&mut builder.cursor(), vmctx);
+        builder.def_var(self.poll_ptr_var, poll_ptr);
+        self.poll_check(builder);
+    }
+
+    /// One load from the poll page: no compare, no branch. The host
+    /// interrupts by making the page inaccessible, and the resulting fault
+    /// at this PC carries `TRAP_INTERRUPT`, so it unwinds as
+    /// `Trap::Interrupt`.
+    ///
+    /// It is an `atomic_load` on purpose. A plain load of the same address
+    /// would be merged with the previous poll by redundant-load elimination
+    /// whenever no store to its alias region sits between them (a loop with
+    /// no calls and no stores has none), which would remove the poll from
+    /// the loop. An atomic load is a memory fence to alias analysis, so every
+    /// poll stays, and it can't be dead-code eliminated or hoisted. On x86
+    /// it lowers to a plain `mov`.
+    fn poll_check(&mut self, builder: &mut FunctionBuilder<'_>) {
+        let addr = builder.use_var(self.poll_ptr_var);
+        let region = self.alias_regions.vmctx().poll_word().region(builder.func);
+        let flags = MemFlagsData::new()
+            .with_aligned()
+            .with_alias_region(Some(region))
+            .with_trap_code(Some(TRAP_INTERRUPT));
+        builder.ins().atomic_load(I64, flags, addr);
     }
 
     fn hook_malloc_exit(&mut self, builder: &mut FunctionBuilder, retvals: &[ir::Value]) {
@@ -5197,7 +5240,11 @@ impl FuncEnvironment<'_> {
             return None;
         }
 
-        if (self.tunables.consume_fuel || self.tunables.epoch_interruption) && cost_per_unit > 0 {
+        if (self.tunables.consume_fuel
+            || self.tunables.epoch_interruption
+            || self.tunables.poll_interruption)
+            && cost_per_unit > 0
+        {
             Some(DeferredBulkOp {
                 units: match const_units {
                     Some(const_units) => DeferredBulkUnits::Const(const_units),
@@ -5236,7 +5283,10 @@ impl FuncEnvironment<'_> {
             return Ok(());
         };
         debug_assert!(
-            (self.tunables.consume_fuel || self.tunables.epoch_interruption) && cost_per_unit > 0
+            (self.tunables.consume_fuel
+                || self.tunables.epoch_interruption
+                || self.tunables.poll_interruption)
+                && cost_per_unit > 0
         );
         if self.tunables.consume_fuel {
             match units {
@@ -5292,6 +5342,9 @@ impl FuncEnvironment<'_> {
         // if the epoch counter has changed.
         if self.tunables.epoch_interruption {
             self.epoch_check(builder);
+        }
+        if self.tunables.poll_interruption {
+            self.poll_check(builder);
         }
     }
 
@@ -5367,6 +5420,9 @@ impl FuncEnvironment<'_> {
         // Initialize `epoch_var` with the current epoch.
         if self.tunables.epoch_interruption {
             self.epoch_function_entry(builder);
+        }
+        if self.tunables.poll_interruption {
+            self.poll_function_entry(builder);
         }
 
         if self.compiler.wmemcheck {

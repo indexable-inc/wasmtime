@@ -548,6 +548,13 @@ impl Instance {
         unsafe { self.vmctx_plus_offset_mut(offset) }
     }
 
+    /// Return a pointer to the store's poll page (ix fork, poll-page
+    /// interruption).
+    pub fn poll_ptr(self: Pin<&mut Self>) -> &mut Option<VmPtr<AtomicU64>> {
+        let offset = self.offsets().ptr.vmctx().poll_ptr();
+        unsafe { self.vmctx_plus_offset_mut(offset) }
+    }
+
     /// Return a pointer to the collector-specific heap data.
     pub fn gc_heap_data(self: Pin<&mut Self>) -> &mut Option<VmPtr<u8>> {
         let offset = self.offsets().ptr.vmctx().gc_heap_data();
@@ -566,6 +573,9 @@ impl Instance {
                 *self.as_mut().epoch_ptr() =
                     Some(NonNull::from(store.engine().epoch_counter()).into());
             }
+            // Rewritten on every instantiation, so a pooling slot reused by
+            // another store polls that store's page, never the old one.
+            *self.as_mut().poll_ptr() = store.poll_ptr().map(Into::into);
 
             if self.env_module().needs_gc_heap {
                 self.as_mut().set_gc_heap(Some(store.unwrap_gc_store()));

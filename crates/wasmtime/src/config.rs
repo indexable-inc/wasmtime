@@ -792,6 +792,30 @@ impl Config {
         self
     }
 
+    /// Interrupt wasm with a poll page instead of an epoch comparison (ix
+    /// fork).
+    ///
+    /// Compiled code loads one word from a per-[`Store`](crate::Store) poll
+    /// page at every function entry and loop header, at the same places an
+    /// epoch check would go, with no compare and no branch. To interrupt, the
+    /// host makes the page inaccessible with
+    /// [`InterruptHandle::interrupt`](crate::InterruptHandle::interrupt),
+    /// from any thread. The next poll faults, and the signal handler turns
+    /// that fault into [`Trap::Interrupt`](crate::Trap::Interrupt), which
+    /// unwinds to the host like any other trap. There is no resume: an
+    /// interrupted call has trapped. Get the handle from
+    /// [`Store::interrupt_handle`](crate::Store::interrupt_handle), and
+    /// re-arm the page with
+    /// [`InterruptHandle::rearm`](crate::InterruptHandle::rearm) before the
+    /// store runs wasm again.
+    ///
+    /// Requires signals-based traps and a unix host, and cannot be combined
+    /// with [`Config::epoch_interruption`]. Not supported by Winch or Pulley.
+    pub fn poll_interruption(&mut self, enable: bool) -> &mut Self {
+        self.tunables.poll_interruption = Some(enable);
+        self
+    }
+
     /// XXX: For internal fuzzing and debugging use only!
     #[doc(hidden)]
     pub fn gc_zeal_alloc_counter(&mut self, counter: Option<NonZeroU32>) -> Result<&mut Self> {
@@ -2914,6 +2938,21 @@ impl Config {
 
         if tunables.debug_native && !tunables.debug_symbols {
             bail!("cannot enable native debug info while debug symbols are disabled");
+        }
+
+        if tunables.poll_interruption {
+            if !cfg!(all(unix, feature = "std")) {
+                bail!("poll-page interruption is only supported on unix hosts with `std`");
+            }
+            if !tunables.signals_based_traps {
+                bail!("poll-page interruption requires signals-based traps");
+            }
+            if tunables.epoch_interruption {
+                bail!("poll-page interruption and epoch interruption cannot both be enabled");
+            }
+            if tunables.winch_callable || self.compiler_target().is_pulley() {
+                bail!("poll-page interruption is only implemented for native Cranelift");
+            }
         }
 
         Ok((tunables, features))

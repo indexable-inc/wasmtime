@@ -463,6 +463,11 @@ pub struct StoreOpaque {
     engine: Engine,
     vm_store_context: VMStoreContext,
 
+    /// The poll page compiled code reads under poll-page interruption (ix
+    /// fork); `None` when `Config::poll_interruption` is off.
+    #[cfg(all(unix, feature = "std"))]
+    poll_page: Option<crate::InterruptHandle>,
+
     // Contains all continuations ever allocated throughout the lifetime of this
     // store.
     #[cfg(feature = "stack-switching")]
@@ -728,6 +733,12 @@ impl<T> Store<T> {
             _marker: marker::PhantomPinned,
             engine: engine.clone(),
             vm_store_context: Default::default(),
+            #[cfg(all(unix, feature = "std"))]
+            poll_page: if engine.tunables().poll_interruption {
+                Some(crate::InterruptHandle::new()?)
+            } else {
+                None
+            },
             #[cfg(feature = "stack-switching")]
             continuations: Vec::new(),
             instances: TryPrimaryMap::new(),
@@ -1085,6 +1096,14 @@ impl<T> Store<T> {
         self.inner.set_epoch_deadline(ticks_beyond_current);
     }
 
+    /// The handle that interrupts this store's wasm from any thread, when
+    /// [`Config::poll_interruption`](crate::Config::poll_interruption) is on;
+    /// `None` otherwise. Every call returns a handle to the same poll page.
+    #[cfg(all(unix, feature = "std"))]
+    pub fn interrupt_handle(&self) -> Option<crate::InterruptHandle> {
+        self.inner.interrupt_handle()
+    }
+
     /// Configures epoch-deadline expiration to trap.
     ///
     /// When epoch-interruption-instrumented code is executed on this
@@ -1334,6 +1353,13 @@ impl<'a, T> StoreContextMut<'a, T> {
         self.0.set_epoch_deadline(ticks_beyond_current);
     }
 
+    /// The handle that interrupts this store's wasm; see
+    /// [`Store::interrupt_handle`].
+    #[cfg(all(unix, feature = "std"))]
+    pub fn interrupt_handle(&self) -> Option<crate::InterruptHandle> {
+        self.0.interrupt_handle()
+    }
+
     /// Configures epoch-deadline expiration to trap.
     ///
     /// For more information see [`Store::epoch_deadline_trap`].
@@ -1518,6 +1544,32 @@ fn set_fuel(
 
 #[doc(hidden)]
 impl StoreOpaque {
+    /// The pointer to write into each instance's vmctx `poll_ptr`.
+    pub(crate) fn poll_ptr(&self) -> Option<NonNull<core::sync::atomic::AtomicU64>> {
+        #[cfg(all(unix, feature = "std"))]
+        if let Some(p) = &self.poll_page {
+            return Some(p.poll_ptr());
+        }
+        None
+    }
+
+    /// Whether `addr` is in this store's poll page.
+    pub(crate) fn poll_page_contains(&self, addr: usize) -> bool {
+        #[cfg(all(unix, feature = "std"))]
+        if let Some(p) = &self.poll_page {
+            return p.contains(addr);
+        }
+        let _ = addr;
+        false
+    }
+
+    /// The handle that interrupts this store's wasm, when
+    /// `Config::poll_interruption` is on.
+    #[cfg(all(unix, feature = "std"))]
+    pub(crate) fn interrupt_handle(&self) -> Option<crate::InterruptHandle> {
+        self.poll_page.clone()
+    }
+
     pub fn id(&self) -> StoreId {
         self.store_data.id()
     }

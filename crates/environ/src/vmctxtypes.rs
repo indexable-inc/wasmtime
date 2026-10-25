@@ -152,6 +152,15 @@ macro_rules! for_each_vmctx_type {
                         epoch_ptr: VmPtr<AtomicU64>
                     }
 
+                    // ix fork: the store's poll page, read at every function
+                    // entry and loop header under poll-page interruption.
+                    field {
+                        #[readonly]
+                        #[can_move]
+                        #[pointee(PollPage as poll_word: AtomicU64)]
+                        poll_ptr: VmPtr<AtomicU64>
+                    }
+
                     // A pointer that different collectors use however they see
                     // fit.
                     field { #[readonly] #[can_move] gc_heap_data: VmPtr<u8> }

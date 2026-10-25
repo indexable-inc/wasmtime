@@ -77,6 +77,7 @@ enum VmType {
     VMFuncRef,
     TypeIdsArray,
     EpochCounter,
+    PollPage,
     BuiltinFunctionsArray,
     ComponentBuiltinFunctionsArray,
     HostValRaw,
