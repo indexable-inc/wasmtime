@@ -225,7 +225,13 @@ pub(crate) fn check(
 
         Inst::Unwind { .. } | Inst::DummyUse { .. } => Ok(()),
 
-        Inst::StackSwitchBasic { .. } => Err(PccError::UnimplementedInst),
+        // A stack switch is a call into another stack: it reads and writes
+        // only the continuations' control contexts (runtime structures, never
+        // a `checked` heap access) and returns a payload the checker knows
+        // nothing about, like a call's return value.
+        Inst::StackSwitchBasic { out_payload0, .. } => {
+            ensure_no_fact(vcode, *out_payload0.to_reg())
+        }
 
         Inst::LabelAddress { dst, .. } => ensure_no_fact(vcode, dst.to_writable_reg().to_reg()),
 
@@ -677,6 +683,40 @@ fn check_external(
             }
             Ok(())
         }
+        // `test r, r` sets ZF, SF and PF like `cmp r, 0`, and clears CF and
+        // OF as `cmp r, 0` does (subtracting 0 never borrows or overflows),
+        // so it records the same flags. Lowering uses it for `icmp _, x, 0`.
+        I::testq_mr(i) => {
+            if let Src::Reg(lhs) = src_of(&i.rm64) {
+                if lhs == rg(&i.r64) {
+                    let lhs = get_fact_or_default(vcode, lhs, 64);
+                    state.cmp_flags = Some((lhs, Fact::constant(64, 0)));
+                }
+            }
+            Ok(())
+        }
+        // After a compare whose right-hand side is the constant 0, CF is 0, so
+        // `ne` (ZF = 0) is exactly `a` (CF = 0 and ZF = 0) and `e` is exactly
+        // `be`. Lowering turns `icmp ugt x, 0` (a bounds check whose adjusted
+        // bound is 0: a static offset of reservation minus access size) into
+        // `ne`. `cmove dst, src` is `cmova` with its arms swapped: the taken
+        // side knows `0 >= lhs`, the other `lhs > 0`.
+        I::cmovneq_rm(i) if cmp_rhs_is_zero(&cmp_flags) => check_cmov(
+            ctx,
+            vcode,
+            i.r64.as_ref(),
+            &i.rm64,
+            &mem,
+            cmp_flags.map(|f| (f, InequalityKind::Strict)),
+        ),
+        I::cmoveq_rm(i) if cmp_rhs_is_zero(&cmp_flags) => check_cmov(
+            ctx,
+            vcode,
+            i.r64.as_ref(),
+            &i.rm64,
+            &mem,
+            cmp_flags.map(|(lhs, rhs)| ((rhs, lhs), InequalityKind::Loose)),
+        ),
         I::cmovaq_rm(i) => check_cmov(
             ctx,
             vcode,
@@ -879,6 +919,14 @@ fn check_xor_zero(
         }
         _ => check_generic(ctx, vcode, inst_idx, inst),
     }
+}
+
+/// Whether the last compare's right-hand side is the constant 0 (a `test r, r`
+/// or a compare against an immediate or a register proven to hold 0).
+fn cmp_rhs_is_zero(cmp_flags: &Option<(Fact, Fact)>) -> bool {
+    cmp_flags
+        .as_ref()
+        .is_some_and(|(_, rhs)| rhs.as_const(64) == Some(0))
 }
 
 /// `cmov{a,ae} dst, src`: `dst = cond ? src : dst`, after a compare that set

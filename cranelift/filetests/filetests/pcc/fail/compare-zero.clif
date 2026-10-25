@@ -1,0 +1,21 @@
+test compile expect-fail
+set enable_pcc=true
+target x86_64
+
+;; `ne` is `a` only after a compare against 0. Against 1, the address
+;; arm is taken when the index is 1, at offset 0x1_0000_0000, outside
+;; the claimed range.
+function %ne_one(i64, i32) -> i32 {
+    mt0 = memory 0x1_0200_0000
+block0(v0 ! mem(mt0, 0, 0): i64, v1: i32):
+    v3 ! def(v1) = uextend.i64 v1
+    v4 ! range(64, 1, 1) = iconst.i64 1
+    v5 = icmp ne v3, v4
+    v7 ! dynamic_mem(mt0, v1, v1) = iadd v0, v3
+    v8 ! range(64, 0xffffffff, 0xffffffff) = iconst.i64 0xffff_ffff
+    v9 ! dynamic_mem(mt0, v1, v1+0xffffffff) = iadd v7, v8
+    v10 ! range(64, 0, 0) = iconst.i64 0
+    v11 ! mem(mt0, 0, 0xffffffff, nullable) = select_spectre_guard v5, v10, v9
+    v12 = uload8.i32 checked v11
+    return v12
+}
