@@ -1752,8 +1752,10 @@ pub struct RegallocOptions {
 
     /// When a spilled bundle does not fit in a register as a whole, cut it
     /// at calls (and, failing that, at block boundaries) and give each
-    /// piece a register when that saves reloads. No eviction; the work is
-    /// bounded linearly in the function size.
+    /// piece a register when that saves reloads. No eviction. The number of
+    /// pieces is budgeted, but each probe walks the conflicting ranges of
+    /// every register over the piece: O(registers x spilled length), about
+    /// 2-3x the base whole-bundle probe, not linear.
     pub split_spill_bundles: bool,
 }
 

@@ -63,7 +63,9 @@ pub(crate) fn define() -> SettingGroup {
         r#"
             When a spilled range does not fit in one register as a whole, cut it at
             calls (and then at block boundaries) and give each piece a register when
-            that saves reloads. No eviction; work stays linear in the function size.
+            that saves reloads. No eviction. Each piece probe walks the conflicting
+            ranges of every register over the piece, so work is about 2-3x the base
+            whole-bundle probe, O(registers x spilled length), not linear.
         "#,
         false,
     );

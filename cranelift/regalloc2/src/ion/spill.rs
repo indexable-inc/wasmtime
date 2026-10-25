@@ -518,11 +518,14 @@ impl<'a, F: Function> Env<'a, F> {
             if old == preg {
                 continue;
             }
-            let removed = self.ctx.pregs[old.index()]
-                .allocations
-                .btree
-                .remove(&LiveRangeKey::from_range(&mr));
-            debug_assert_eq!(removed, Some(m));
+            // Keys compare by overlap: remove only if the overlapping entry
+            // is exactly `m`, or another range's reservation would vanish.
+            let key = LiveRangeKey::from_range(&mr);
+            let btree = &mut self.ctx.pregs[old.index()].allocations.btree;
+            if btree.get(&key) != Some(&m) {
+                continue;
+            }
+            btree.remove(&key);
             self.ctx.bundles[mb].allocation = Allocation::reg(preg);
             self.ctx.output.stats.spill_uses_absorbed += 1;
         }
