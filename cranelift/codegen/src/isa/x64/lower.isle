@@ -368,6 +368,17 @@
       (if (ty_int_ref_scalar_64 ty))
       (x64_and ty y x))
 
+;; Masking to the low 8, 16 or 32 bits is a zero-extending move, whose
+;; destination is not tied to its source (an `and` needs a copy when `x` stays
+;; live). `x` is always put in a register: narrowing a sunk load would read
+;; fewer bytes, and could skip a trap the full-width load takes.
+(rule 3 (lower (band (ty_32_or_64 _) x (u64_from_iconst 0xff)))
+      (x64_movzx (ExtMode.BL) (put_in_gpr x)))
+(rule 3 (lower (band (ty_32_or_64 _) x (u64_from_iconst 0xffff)))
+      (x64_movzx (ExtMode.WL) (put_in_gpr x)))
+(rule 3 (lower (band $I64 x (u64_from_iconst 0xffffffff)))
+      (x64_movzx (ExtMode.LQ) (put_in_gpr x)))
+
 ;; f32 and f64
 
 ;; Note that `x` and `y` are both constrained to being in registers here because

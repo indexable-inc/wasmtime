@@ -1,0 +1,182 @@
+test compile precise-output
+set opt_level=speed
+target x86_64
+
+;; Masking to the low 8, 16 or 32 bits is a zero-extending move: no copy of
+;; `v0`, which stays live.
+function %mask8_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 0xff
+    v2 = band v0, v1
+    v3 = iadd v2, v0
+    return v3
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movzbl %dil, %esi
+;   leal (%rsi, %rdi), %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movzbl %dil, %esi
+;   leal (%rsi, %rdi), %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %mask16_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 0xffff
+    v2 = band v0, v1
+    v3 = iadd v2, v0
+    return v3
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movzwl %di, %esi
+;   leal (%rsi, %rdi), %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movzwl %di, %esi
+;   leal (%rsi, %rdi), %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %mask8_i64(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 0xff
+    v2 = band v0, v1
+    v3 = iadd v2, v0
+    return v3
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movzbl %dil, %esi
+;   leaq (%rsi, %rdi), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movzbl %dil, %esi
+;   leaq (%rsi, %rdi), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+function %mask32_i64(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 0xffffffff
+    v2 = band v0, v1
+    v3 = iadd v2, v0
+    return v3
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movl %edi, %esi
+;   leaq (%rsi, %rdi), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movl %edi, %esi
+;   leaq (%rsi, %rdi), %rax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+;; The masked value is a load: it stays a full-width load into a register,
+;; never a narrower read of memory.
+function %mask8_of_load(i64) -> i32 {
+block0(v0: i64):
+    v1 = load.i32 little v0
+    v2 = iconst.i32 0xff
+    v3 = band v1, v2
+    return v3
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movl (%rdi), %esi
+;   movzbl %sil, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movl (%rdi), %esi ; trap: heap_oob
+;   movzbl %sil, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
+;; Other masks are still an `and`.
+function %mask7f(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 0x7f
+    v2 = band v0, v1
+    return v2
+}
+
+; VCode:
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block0:
+;   movq %rdi, %rax
+;   andl $0x7f, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pushq %rbp
+;   movq %rsp, %rbp
+; block1: ; offset 0x4
+;   movq %rdi, %rax
+;   andl $0x7f, %eax
+;   movq %rbp, %rsp
+;   popq %rbp
+;   retq
+
