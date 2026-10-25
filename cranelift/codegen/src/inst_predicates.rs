@@ -49,7 +49,8 @@ fn has_side_effect(func: &Function, inst: Inst) -> bool {
 /// aegraph semantics?
 ///
 /// - Trivially pure nodes (bitwise arithmetic, etc)
-/// - Loads with the `readonly`, `notrap`, and `can_move` flags set
+/// - Loads with the `readonly`, `notrap`, and `can_move` flags set, and not
+///   `volatile` (a volatile load is never merged, moved or deleted)
 pub fn is_pure_for_egraph(func: &Function, inst: Inst) -> bool {
     let is_pure_load = match func.dfg.insts[inst] {
         InstructionData::Load {
@@ -58,7 +59,7 @@ pub fn is_pure_for_egraph(func: &Function, inst: Inst) -> bool {
             ..
         } => {
             let flags = func.dfg.mem_flags[flags];
-            flags.readonly() && flags.notrap() && flags.can_move()
+            flags.readonly() && flags.notrap() && flags.can_move() && !flags.volatile()
         }
         _ => false,
     };

@@ -77,7 +77,6 @@ enum VmType {
     VMFuncRef,
     TypeIdsArray,
     EpochCounter,
-    PollWord,
     BuiltinFunctionsArray,
     ComponentBuiltinFunctionsArray,
     HostValRaw,
@@ -86,6 +85,9 @@ enum VmType {
     VMGcHeader,
     VMDrcHeader,
     VMCopyingHeader,
+    // ix fork: kept last so upstream variants keep their discriminants, and
+    // with them the alias-region `user_id` hashes in `tests/disas`.
+    PollWord,
 }
 
 /// A key that uniquely identifies an alias region across an entire compilation.
