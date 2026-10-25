@@ -48,6 +48,7 @@ include!(concat!(env!("ISLE_DIR"), "/isle_numerics.rs"));
 
 #[macro_use]
 mod machinst;
+pub mod ra_trace;
 
 pub mod binemit;
 pub mod cfg_printer;

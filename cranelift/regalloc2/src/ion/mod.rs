@@ -75,7 +75,10 @@ impl<'a, F: Function> Env<'a, F> {
         ctx.output.num_spillslots = 0;
         ctx.output.debug_locations.clear();
         ctx.output.edits.clear();
+        ctx.output.edit_reasons.clear();
         ctx.output.stats = Stats::default();
+        ctx.lr_tags.clear();
+        ctx.bundle_tags.clear();
 
         Self { func, env, ctx }
     }
@@ -111,6 +114,7 @@ pub fn run<F: Function>(
     ctx: &mut Ctx,
     enable_annotations: bool,
     enable_ssa_checker: bool,
+    trace_reasons: bool,
 ) -> Result<(), RegAllocError> {
     ctx.cfginfo.init(func, &mut ctx.cfginfo_ctx)?;
 
@@ -119,6 +123,7 @@ pub fn run<F: Function>(
     }
 
     ctx.annotations_enabled = enable_annotations;
+    ctx.trace_reasons = trace_reasons;
     let mut env = Env::new(func, mach_env, ctx);
     env.init()?;
 
@@ -128,6 +133,11 @@ pub fn run<F: Function>(
         env.dump_results();
     }
 
+    if trace_reasons {
+        ctx.output
+            .edit_reasons
+            .extend(edits.iter().map(|(pos_prio, _)| pos_prio.reason()));
+    }
     ctx.output.edits.extend(edits.drain_edits());
 
     Ok(())

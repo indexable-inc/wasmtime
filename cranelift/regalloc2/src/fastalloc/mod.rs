@@ -1637,5 +1637,6 @@ pub fn run<F: Function>(
         num_spillslots: env.state.stack.num_spillslots as usize,
         debug_locations: env.debug_locations,
         stats: env.stats,
+        edit_reasons: Vec::new(),
     })
 }

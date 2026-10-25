@@ -140,6 +140,10 @@ impl Context {
 
             self.verify_if(isa)?;
             self.optimize(isa, ctrl_plane)?;
+            let trace_ra = crate::ra_trace::enabled();
+            if trace_ra {
+                crate::ra_trace::clear_pending();
+            }
             result = isa.compile_function(
                 &self.func,
                 &self.domtree,
@@ -147,6 +151,9 @@ impl Context {
                 self.want_disasm,
                 ctrl_plane,
             );
+            if trace_ra && result.is_ok() {
+                crate::ra_trace::flush(&self.func.name);
+            }
         }
         trace!("****** DONE compiling {}\n", self.func.display_spec());
         result

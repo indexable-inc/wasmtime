@@ -568,6 +568,15 @@ pub struct Ctx {
     pub(crate) scratch_workqueue_set: FxHashSet<Block>,
 
     pub(crate) scratch_bump: UnsafeSendSync<Bump>,
+
+    // Bench-only move-reason tracing (see `crate::edit_reason`). Only
+    // written when `trace_reasons` is set; indexed lazily (missing entries
+    // read as "original").
+    pub(crate) trace_reasons: bool,
+    /// Per LR: [tag of the boundary at its start, tag of the boundary at its end].
+    pub(crate) lr_tags: Vec<[u16; 2]>,
+    /// Per bundle: the tag of the split that created it.
+    pub(crate) bundle_tags: Vec<u16>,
 }
 
 const _ASSERT_SEND_SYNC: () = {
@@ -629,6 +638,9 @@ impl Default for Ctx {
             scratch_removed_lrs: Default::default(),
             scratch_removed_lrs_vregs: Default::default(),
             scratch_workqueue_set: Default::default(),
+            trace_reasons: false,
+            lr_tags: Default::default(),
+            bundle_tags: Default::default(),
         }
     }
 }
@@ -636,6 +648,50 @@ impl Default for Ctx {
 impl Ctx {
     pub(crate) fn bump(&self) -> Bump {
         self.scratch_bump.clone()
+    }
+
+    #[inline]
+    pub(crate) fn lr_tag(&self, lr: LiveRangeIndex) -> [u16; 2] {
+        self.lr_tags.get(lr.index()).copied().unwrap_or([0, 0])
+    }
+    #[inline]
+    pub(crate) fn bundle_tag(&self, b: LiveBundleIndex) -> u16 {
+        self.bundle_tags.get(b.index()).copied().unwrap_or(0)
+    }
+    fn lr_tag_mut(&mut self, lr: LiveRangeIndex) -> &mut [u16; 2] {
+        let i = lr.index();
+        if i >= self.lr_tags.len() {
+            self.lr_tags.resize(i + 1, [0, 0]);
+        }
+        &mut self.lr_tags[i]
+    }
+    /// Record `tag` as the cause of the boundary at the start of `lr`.
+    #[inline]
+    pub(crate) fn set_lr_start_tag(&mut self, lr: LiveRangeIndex, tag: u16) {
+        if self.trace_reasons {
+            self.lr_tag_mut(lr)[0] = tag;
+        }
+    }
+    /// Record `tag` as the cause of the boundary at the end of `lr`.
+    #[inline]
+    pub(crate) fn set_lr_end_tag(&mut self, lr: LiveRangeIndex, tag: u16) {
+        if self.trace_reasons {
+            self.lr_tag_mut(lr)[1] = tag;
+        }
+    }
+    /// Record `tag` as the creation cause of bundle `b` (only if unset when
+    /// `only_if_unset`).
+    #[inline]
+    pub(crate) fn set_bundle_tag(&mut self, b: LiveBundleIndex, tag: u16, only_if_unset: bool) {
+        if self.trace_reasons {
+            let i = b.index();
+            if i >= self.bundle_tags.len() {
+                self.bundle_tags.resize(i + 1, 0);
+            }
+            if !only_if_unset || self.bundle_tags[i] == 0 {
+                self.bundle_tags[i] = tag;
+            }
+        }
     }
 }
 
@@ -827,6 +883,9 @@ pub struct InsertedMove {
     pub from_alloc: Allocation,
     pub to_alloc: Allocation,
     pub to_vreg: VReg,
+    /// Bench-only reason (KIND and tag bits of `crate::edit_reason`, DIR and
+    /// SRC filled later); 0 unless tracing.
+    pub reason: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -852,6 +911,7 @@ impl InsertedMoves {
         from_alloc: Allocation,
         to_alloc: Allocation,
         to_vreg: VReg,
+        reason: u16,
     ) {
         trace!(
             "insert_move: pos {:?} prio {:?} from_alloc {:?} to_alloc {:?} to_vreg {:?}",
@@ -879,6 +939,7 @@ impl InsertedMoves {
             from_alloc,
             to_alloc,
             to_vreg,
+            reason,
         });
     }
 }
@@ -938,9 +999,27 @@ pub struct PosWithPrio {
 }
 
 impl PosWithPrio {
+    /// Sort key. The upper 16 bits of `prio` carry the bench-only edit
+    /// reason on `Edits` entries and are excluded so that tracing never
+    /// changes edit order (they are always zero when not tracing).
     #[inline]
     pub fn key(self) -> u64 {
-        u64_key(self.pos.to_index(), self.prio)
+        u64_key(self.pos.to_index(), self.prio & 0xffff)
+    }
+
+    /// The bench-only edit reason stored in the upper bits of `prio`.
+    #[inline]
+    pub fn reason(self) -> u16 {
+        (self.prio >> 16) as u16
+    }
+
+    /// This position/priority with `reason` stored in the upper bits.
+    #[inline]
+    pub fn with_reason(self, reason: u16) -> Self {
+        Self {
+            pos: self.pos,
+            prio: (self.prio & 0xffff) | (u32::from(reason) << 16),
+        }
     }
 }
 

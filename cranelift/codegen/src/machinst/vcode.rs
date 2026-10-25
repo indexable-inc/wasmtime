@@ -813,6 +813,10 @@ impl<I: VCodeInst> VCode<I> {
             ra_edits_per_block.push((end_edit_idx - start_edit_idx) as u32);
         }
 
+        // Bench-only regalloc move trace (see `crate::ra_trace`).
+        let mut ra_records: Option<Vec<crate::ra_trace::Record>> =
+            crate::ra_trace::enabled().then(Vec::new);
+
         let is_forward_edge_cfi_enabled = self.abi.is_forward_edge_cfi_enabled();
         let mut bb_padding = match flags.bb_padding_log2_minus_one() {
             0 => Vec::new(),
@@ -835,15 +839,19 @@ impl<I: VCodeInst> VCode<I> {
             }
             assert_eq!(buffer.cur_offset(), new_offset);
 
+            // Returns the buffer offset just past `inst` (before any island
+            // emitted after it).
             let do_emit = |inst: &I,
                            disasm: &mut String,
                            buffer: &mut MachBuffer<I>,
-                           state: &mut I::State| {
+                           state: &mut I::State|
+             -> CodeOffset {
                 if want_disasm && !inst.is_args() {
                     let mut s = state.clone();
                     writeln!(disasm, "  {}", inst.pretty_print_inst(&mut s)).unwrap();
                 }
                 inst.emit(buffer, &self.emit_info, state);
+                let inst_end = buffer.cur_offset();
                 // The buffer maintains its deadline invariant per-`MachInst`:
                 // after each instruction, ensure that the worst-case end of
                 // any island the buffer might emit lies before the soonest
@@ -855,6 +863,7 @@ impl<I: VCodeInst> VCode<I> {
                     buffer.emit_island(0, state.ctrl_plane_mut());
                     buffer.bind_label(jump_around, state.ctrl_plane_mut());
                 }
+                inst_end
             };
 
             // Is this the first block? Emit the prologue directly if so.
@@ -1051,10 +1060,12 @@ impl<I: VCodeInst> VCode<I> {
                         }
                     }
 
-                    InstOrEdit::Edit(Edit::Move { from, to }) => {
+                    InstOrEdit::Edit(edit) => {
+                        let Edit::Move { from, to } = *edit;
+                        let ra_start = buffer.cur_offset();
                         // Create a move/spill/reload instruction and
                         // immediately emit it.
-                        match (from.as_reg(), to.as_reg()) {
+                        let (ra_kind, ra_end) = match (from.as_reg(), to.as_reg()) {
                             (Some(from), Some(to)) => {
                                 // Reg-to-reg move.
                                 let from_rreg = Reg::from(from);
@@ -1062,25 +1073,39 @@ impl<I: VCodeInst> VCode<I> {
                                 debug_assert_eq!(from.class(), to.class());
                                 let ty = I::canonical_type_for_rc(from.class());
                                 let mv = I::gen_move(to_rreg, from_rreg, ty);
-                                do_emit(&mv, &mut disasm, &mut buffer, &mut state);
+                                ("move", do_emit(&mv, &mut disasm, &mut buffer, &mut state))
                             }
                             (Some(from), None) => {
                                 // Spill from register to spillslot.
                                 let to = to.as_stack().unwrap();
                                 let from_rreg = RealReg::from(from);
                                 let spill = self.abi.gen_spill(to, from_rreg);
-                                do_emit(&spill, &mut disasm, &mut buffer, &mut state);
+                                ("spill", do_emit(&spill, &mut disasm, &mut buffer, &mut state))
                             }
                             (None, Some(to)) => {
                                 // Load from spillslot to register.
                                 let from = from.as_stack().unwrap();
                                 let to_rreg = Writable::from_reg(RealReg::from(to));
                                 let reload = self.abi.gen_reload(to_rreg, from);
-                                do_emit(&reload, &mut disasm, &mut buffer, &mut state);
+                                ("reload", do_emit(&reload, &mut disasm, &mut buffer, &mut state))
                             }
                             (None, None) => {
                                 panic!("regalloc2 should have eliminated stack-to-stack moves!");
                             }
+                        };
+                        if let Some(records) = ra_records.as_mut() {
+                            let reason = regalloc
+                                .edit_index(edit)
+                                .and_then(|i| regalloc.edit_reasons.get(i).copied())
+                                .unwrap_or(u16::MAX);
+                            records.push(crate::ra_trace::Record {
+                                start: ra_start,
+                                end: ra_end,
+                                reason,
+                                kind: ra_kind,
+                                from: format!("{from}"),
+                                to: format!("{to}"),
+                            });
                         }
                     }
                 }
@@ -1130,6 +1155,13 @@ impl<I: VCodeInst> VCode<I> {
         // Do any optimizations on branches at tail of buffer, as if we had
         // bound one last label.
         buffer.optimize_branches(ctrl_plane);
+
+        if let Some(records) = ra_records {
+            // Branch removal only ever truncates branches at the buffer tail,
+            // so recorded edits (never branches) keep their offsets.
+            debug_assert!(records.iter().all(|r| r.end <= buffer.cur_offset()));
+            crate::ra_trace::set_pending(records);
+        }
 
         // emission state is not needed anymore, move control plane back out
         *ctrl_plane = state.take_ctrl_plane();

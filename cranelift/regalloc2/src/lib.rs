@@ -1599,9 +1599,28 @@ pub struct Output {
 
     /// Internal stats from the allocator.
     pub stats: ion::Stats,
+
+    /// Bench-only: why each edit was inserted, parallel to `edits`
+    /// (`edit_reasons[i]` explains `edits[i]`). Filled only when
+    /// `RegallocOptions::trace_reasons` is set and the Ion allocator
+    /// runs; empty otherwise. See [`edit_reason`] for the encoding.
+    pub edit_reasons: Vec<u16>,
 }
 
 impl Output {
+    /// Index of `edit` in `self.edits`, if `edit` is a reference into
+    /// that vector (as handed out by [`Output::block_insts_and_edits`]).
+    pub fn edit_index(&self, edit: &Edit) -> Option<usize> {
+        let first = self.edits.first()?;
+        let stride = core::mem::size_of::<(ProgPoint, Edit)>();
+        let off = (edit as *const Edit as usize).wrapping_sub(&first.1 as *const Edit as usize);
+        if off % stride != 0 {
+            return None;
+        }
+        let i = off / stride;
+        (i < self.edits.len()).then_some(i)
+    }
+
     /// Get the allocations assigned to a given instruction.
     pub fn inst_allocs(&self, inst: Inst) -> &[Allocation] {
         let start = self.inst_alloc_offsets[inst.index()] as usize;
@@ -1708,7 +1727,14 @@ pub fn run_with_ctx<'a, F: Function>(
     ctx: &'a mut Ctx,
 ) -> Result<&'a Output, RegAllocError> {
     match options.algorithm {
-        Algorithm::Ion => ion::run(func, env, ctx, options.verbose_log, options.validate_ssa)?,
+        Algorithm::Ion => ion::run(
+            func,
+            env,
+            ctx,
+            options.verbose_log,
+            options.validate_ssa,
+            options.trace_reasons,
+        )?,
         Algorithm::Fastalloc => {
             ctx.output = fastalloc::run(func, env, options.verbose_log, options.validate_ssa)?
         }
@@ -1734,6 +1760,128 @@ pub struct RegallocOptions {
 
     /// The register allocation algorithm to be used.
     pub algorithm: Algorithm,
+
+    /// Bench-only: record why each edit was inserted in
+    /// `Output::edit_reasons`. Never changes any allocation decision;
+    /// when false no extra work is done. Ion only.
+    pub trace_reasons: bool,
+}
+
+/// Encoding of `Output::edit_reasons` entries (a `u16` per edit).
+///
+/// ```text
+/// bits  0..2   DIR     0 reg->reg, 1 reg->stack (spill store),
+///                      2 stack->reg (reload), 3 stack->stack
+/// bits  2..5   KIND    which move-insertion path produced the move
+/// bits  5..9   CAUSE   why the two sides ended up in different allocations
+/// bit   9      SPILL   the boundary is into/out of a region that was trimmed
+///                      into the spill bundle (trim_ends / minimal-split spill LR)
+/// bits 10..14  TRIGGER for CAUSE_MIN_*: the cause of the split request that
+///                      fell back to minimal bundles
+/// bits 14..16  SRC     where CAUSE came from (see SRC_*)
+/// ```
+///
+/// CAUSE is the "born by" tag of the live-range boundary the move implements.
+/// Every split records its cause on both sides of the boundary it creates
+/// (end of the earlier LR, start of the later LR) and on the bundle it creates.
+/// For a move we take, in order: the destination LR's start-boundary tag, the
+/// source LR's end-boundary tag (both only when that boundary is where the move
+/// sits), then the destination bundle's tag, then the source bundle's tag; the
+/// first non-original one wins and SRC says which. Destination first because a
+/// reload/connection is caused by the split that created the LR being entered;
+/// a spill store into a trimmed spill region is tagged on the spill LR's start
+/// with the same cause, so it agrees.
+pub mod edit_reason {
+    pub const DIR_REG_REG: u16 = 0;
+    pub const DIR_REG_STACK: u16 = 1;
+    pub const DIR_STACK_REG: u16 = 2;
+    pub const DIR_STACK_STACK: u16 = 3;
+
+    /// Connection between two adjacent LRs of the same vreg inside a block.
+    pub const KIND_INTRA_BLOCK: u16 = 0;
+    /// Connection of the same vreg across a CFG edge (block boundary).
+    pub const KIND_EDGE: u16 = 1;
+    /// Block-param / branch-arg move between different vregs (their bundles
+    /// were not merged, or were merged and split apart again).
+    pub const KIND_BLOCKPARAM: u16 = 2;
+    /// Reused-input (tied operand) fixup copy before an instruction.
+    pub const KIND_REUSE_FIXUP: u16 = 3;
+    /// Same vreg needed in several fixed regs at one instruction
+    /// (multi-fixed-reg fixup, e.g. a value passed twice to a call).
+    pub const KIND_MULTI_FIXED_FIXUP: u16 = 4;
+    /// Save/restore of a borrowed scratch register by the parallel-move
+    /// resolver (not attributable to one original move).
+    pub const KIND_SCRATCH_SAVE: u16 = 5;
+    pub const KIND_UNKNOWN: u16 = 7;
+
+    /// Original liveness boundary (no split involved).
+    pub const CAUSE_ORIGINAL: u16 = 0;
+    /// Split at a conflict with another (non-fixed) bundle (eviction path).
+    pub const CAUSE_CONFLICT_BUNDLE: u16 = 1;
+    /// Split at a conflict with a fixed-reg-constrained bundle at a call
+    /// instruction (call args / rets in ABI registers).
+    pub const CAUSE_CONFLICT_FIXED_CALL: u16 = 2;
+    /// Split at a conflict with a fixed-reg-constrained bundle at a non-call
+    /// instruction (shift count, div, etc).
+    pub const CAUSE_CONFLICT_FIXED_OTHER: u16 = 3;
+    /// Split at a fixed preg reservation that is a call clobber.
+    pub const CAUSE_CALL_CLOBBER: u16 = 4;
+    /// Split at a fixed preg reservation at a call that is not a clobber.
+    pub const CAUSE_FIXED_RESV_AT_CALL: u16 = 5;
+    /// Split at any other fixed preg reservation.
+    pub const CAUSE_FIXED_RESV_OTHER: u16 = 6;
+    /// Split because the bundle's uses have conflicting requirements.
+    pub const CAUSE_REQUIREMENT: u16 = 7;
+    /// Split into minimal bundles because MAX_SPLITS_PER_SPILLSET was reached.
+    pub const CAUSE_MIN_MAX_SPLITS: u16 = 8;
+    /// Split into minimal bundles because the bundle spans one instruction.
+    pub const CAUSE_MIN_ONE_INST: u16 = 9;
+
+    pub const SRC_DST_START: u16 = 0;
+    pub const SRC_SRC_END: u16 = 1;
+    pub const SRC_DST_BUNDLE: u16 = 2;
+    pub const SRC_SRC_BUNDLE: u16 = 3;
+
+    /// A boundary/bundle tag: `CAUSE | SPILL << 4 | TRIGGER << 5` (9 bits).
+    pub type Tag = u16;
+    pub const TAG_SPILL: Tag = 1 << 4;
+
+    #[inline]
+    pub const fn tag(cause: u16, spill: bool, trigger: u16) -> Tag {
+        cause | if spill { TAG_SPILL } else { 0 } | (trigger << 5)
+    }
+    #[inline]
+    pub const fn tag_cause(t: Tag) -> u16 {
+        t & 0xf
+    }
+    #[inline]
+    pub const fn encode(dir: u16, kind: u16, tag: Tag, src: u16) -> u16 {
+        dir | (kind << 2) | (tag << 5) | (src << 14)
+    }
+    #[inline]
+    pub const fn dir(r: u16) -> u16 {
+        r & 3
+    }
+    #[inline]
+    pub const fn kind(r: u16) -> u16 {
+        (r >> 2) & 7
+    }
+    #[inline]
+    pub const fn cause(r: u16) -> u16 {
+        (r >> 5) & 0xf
+    }
+    #[inline]
+    pub const fn spill(r: u16) -> bool {
+        (r >> 9) & 1 != 0
+    }
+    #[inline]
+    pub const fn trigger(r: u16) -> u16 {
+        (r >> 10) & 0xf
+    }
+    #[inline]
+    pub const fn src(r: u16) -> u16 {
+        (r >> 14) & 3
+    }
 }
 
 pub(crate) trait VecExt<T> {

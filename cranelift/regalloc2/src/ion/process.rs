@@ -23,8 +23,8 @@ use crate::{
         MINIMAL_BUNDLE_SPILL_WEIGHT, MINIMAL_FIXED_BUNDLE_SPILL_WEIGHT,
         MINIMAL_LIMITED_BUNDLE_SPILL_WEIGHT,
     },
-    Allocation, Function, Inst, InstPosition, OperandConstraint, OperandKind, PReg, ProgPoint,
-    RegAllocError,
+    edit_reason as er, Allocation, Function, Inst, InstPosition, OperandConstraint, OperandKind,
+    PReg, ProgPoint, RegAllocError,
 };
 use core::fmt::Debug;
 use smallvec::{smallvec, SmallVec};
@@ -417,6 +417,8 @@ impl<'a, F: Function> Env<'a, F> {
         // Do we trim the parts around the split and put them in the
         // spill bundle?
         mut trim_ends_into_spill_bundle: bool,
+        // Bench-only: why we split (an `edit_reason::CAUSE_*`).
+        cause: u16,
     ) {
         self.ctx.output.stats.splits += 1;
         trace!(
@@ -434,7 +436,11 @@ impl<'a, F: Function> Env<'a, F> {
         // bundle. See the doc-comment on
         // `split_into_minimal_bundles()` above for more.
         if self.ctx.spillsets[spillset].splits >= MAX_SPLITS_PER_SPILLSET {
-            self.split_into_minimal_bundles(bundle, hint);
+            self.split_into_minimal_bundles(
+                bundle,
+                hint,
+                er::tag(er::CAUSE_MIN_MAX_SPLITS, false, cause),
+            );
             return;
         }
         self.ctx.spillsets[spillset].splits += 1;
@@ -459,7 +465,11 @@ impl<'a, F: Function> Env<'a, F> {
         // minimal-bundle splitting in this case as well.
         if bundle_end.prev().inst() == bundle_start.inst() {
             trace!(" -> spans only one inst; splitting into minimal bundles");
-            self.split_into_minimal_bundles(bundle, hint);
+            self.split_into_minimal_bundles(
+                bundle,
+                hint,
+                er::tag(er::CAUSE_MIN_ONE_INST, false, cause),
+            );
             return;
         }
 
@@ -595,6 +605,10 @@ impl<'a, F: Function> Env<'a, F> {
                 self.ctx.scratch_bump.clone(),
             );
             self.ctx.ranges[new_lr].vreg = self.ranges[orig_lr].vreg;
+            if self.ctx.trace_reasons {
+                let orig_end = self.ctx.lr_tag(orig_lr)[1];
+                self.ctx.set_lr_end_tag(new_lr, orig_end);
+            }
             trace!(" -> splitting LR {:?} into {:?}", orig_lr, new_lr);
             let first_use = self.ctx.ranges[orig_lr]
                 .uses
@@ -642,6 +656,16 @@ impl<'a, F: Function> Env<'a, F> {
         }
         self.ctx.bundles[new_bundle].ranges = new_lr_list;
 
+        let split_tag = er::tag(cause, false, 0);
+        let spill_tag = er::tag(cause, true, 0);
+        if self.ctx.trace_reasons {
+            let old_last = self.ctx.bundles[bundle].ranges.last().unwrap().index;
+            let new_first = self.ctx.bundles[new_bundle].ranges[0].index;
+            self.ctx.set_lr_end_tag(old_last, split_tag);
+            self.ctx.set_lr_start_tag(new_first, split_tag);
+            self.ctx.set_bundle_tag(new_bundle, split_tag, false);
+        }
+
         if trim_ends_into_spill_bundle {
             // Finally, handle moving LRs to the spill bundle when
             // appropriate: If the first range in `new_bundle` or last
@@ -667,6 +691,15 @@ impl<'a, F: Function> Env<'a, F> {
                     self.ctx.bundles[spill].ranges.push(entry);
                     self.ctx.bundles[bundle].ranges.pop();
                     self.ctx.ranges[entry.index].bundle = spill;
+                    if self.ctx.trace_reasons {
+                        self.ctx.set_bundle_tag(spill, spill_tag, true);
+                        self.ctx.set_lr_start_tag(entry.index, spill_tag);
+                        self.ctx.set_lr_end_tag(entry.index, spill_tag);
+                        if let Some(prev) = self.ctx.bundles[bundle].ranges.last() {
+                            let prev = prev.index;
+                            self.ctx.set_lr_end_tag(prev, spill_tag);
+                        }
+                    }
                     continue;
                 }
                 let last_use = last_use.unwrap();
@@ -693,6 +726,13 @@ impl<'a, F: Function> Env<'a, F> {
                         range,
                         index: empty_lr,
                     });
+                    if self.ctx.trace_reasons {
+                        let old_end = self.ctx.lr_tag(entry.index)[1];
+                        self.ctx.set_bundle_tag(spill, spill_tag, true);
+                        self.ctx.set_lr_end_tag(entry.index, spill_tag);
+                        self.ctx.set_lr_start_tag(empty_lr, spill_tag);
+                        self.ctx.set_lr_end_tag(empty_lr, old_end);
+                    }
                     trace!(
                         " -> bundle {:?} range {:?}: last use implies split point {:?}",
                         bundle,
@@ -727,6 +767,15 @@ impl<'a, F: Function> Env<'a, F> {
                     self.ctx.bundles[spill].ranges.push(entry);
                     self.ctx.bundles[new_bundle].ranges.drain(..1);
                     self.ctx.ranges[entry.index].bundle = spill;
+                    if self.ctx.trace_reasons {
+                        self.ctx.set_bundle_tag(spill, spill_tag, true);
+                        self.ctx.set_lr_start_tag(entry.index, spill_tag);
+                        self.ctx.set_lr_end_tag(entry.index, spill_tag);
+                        if let Some(next) = self.ctx.bundles[new_bundle].ranges.first() {
+                            let next = next.index;
+                            self.ctx.set_lr_start_tag(next, spill_tag);
+                        }
+                    }
                     continue;
                 }
                 let first_use = first_use.unwrap();
@@ -758,6 +807,13 @@ impl<'a, F: Function> Env<'a, F> {
                         range,
                         index: empty_lr,
                     });
+                    if self.ctx.trace_reasons {
+                        let old_start = self.ctx.lr_tag(entry.index)[0];
+                        self.ctx.set_bundle_tag(spill, spill_tag, true);
+                        self.ctx.set_lr_start_tag(entry.index, spill_tag);
+                        self.ctx.set_lr_end_tag(empty_lr, spill_tag);
+                        self.ctx.set_lr_start_tag(empty_lr, old_start);
+                    }
                     trace!(
                         " -> bundle {:?} range {:?}: first use implies split point {:?}",
                         bundle,
@@ -820,7 +876,14 @@ impl<'a, F: Function> Env<'a, F> {
     /// the spill bundle; and then does minimal reservations of
     /// registers just at uses/defs and moves the "spilled" value
     /// into/out of them immediately.
-    pub fn split_into_minimal_bundles(&mut self, bundle: LiveBundleIndex, hint: PReg) {
+    pub fn split_into_minimal_bundles(
+        &mut self,
+        bundle: LiveBundleIndex,
+        hint: PReg,
+        // Bench-only: tag (`edit_reason::tag`) recorded on the new
+        // boundaries.
+        min_tag: u16,
+    ) {
         assert_eq!(self.ctx.scratch_removed_lrs_vregs.len(), 0);
         self.ctx.scratch_removed_lrs.clear();
 
@@ -831,6 +894,8 @@ impl<'a, F: Function> Env<'a, F> {
         let spill = self
             .get_or_create_spill_bundle(bundle, /* create_if_absent = */ true)
             .unwrap();
+        let min_spill_tag = min_tag | er::TAG_SPILL;
+        self.ctx.set_bundle_tag(spill, min_spill_tag, true);
 
         trace!("Splitting bundle {bundle:?} into minimal bundles with reg hint {hint:?}");
 
@@ -847,6 +912,7 @@ impl<'a, F: Function> Env<'a, F> {
 
             let mut spill_range = entry.range;
             let mut spill_starts_def = false;
+            let [old_start_tag, old_end_tag] = self.ctx.lr_tag(entry.index);
 
             let empty_vec = UseList::new_in(self.ctx.bump());
             for u in core::mem::replace(&mut self.ctx.ranges[entry.index].uses, empty_vec) {
@@ -902,6 +968,11 @@ impl<'a, F: Function> Env<'a, F> {
                 if is_def {
                     self.ctx.ranges[lr].set_flag(LiveRangeFlag::StartsAtDef);
                 }
+                if self.ctx.trace_reasons {
+                    self.ctx.set_lr_start_tag(lr, min_tag);
+                    self.ctx.set_lr_end_tag(lr, min_tag);
+                    self.ctx.set_bundle_tag(new_bundle, min_tag, false);
+                }
 
                 trace!(
                     "    -> created new LR {:?} range {:?} with new bundle {:?} for this use",
@@ -922,6 +993,18 @@ impl<'a, F: Function> Env<'a, F> {
                 self.ctx.ranges[spill_lr].vreg = vreg;
                 self.ctx.ranges[spill_lr].bundle = spill;
                 self.ctx.ranges[spill_lr].uses.extend(spill_uses.drain(..));
+                if self.ctx.trace_reasons {
+                    // A spill LR that starts after a def in a minimal
+                    // bundle is entered by a spill store caused by this
+                    // split; otherwise it inherits the old boundary.
+                    let start_tag = if spill_range.from != entry.range.from {
+                        min_spill_tag
+                    } else {
+                        old_start_tag
+                    };
+                    self.ctx.set_lr_start_tag(spill_lr, start_tag);
+                    self.ctx.set_lr_end_tag(spill_lr, old_end_tag);
+                }
                 new_lrs.push((vreg, spill_lr));
 
                 if spill_starts_def {
@@ -1007,6 +1090,7 @@ impl<'a, F: Function> Env<'a, F> {
                     hint,
                     /* trim_ends_into_spill_bundle = */
                     conflict.should_trim_edges_around_split(),
+                    er::CAUSE_REQUIREMENT,
                 );
                 return Ok(());
             }
@@ -1066,6 +1150,7 @@ impl<'a, F: Function> Env<'a, F> {
             let mut lowest_cost_split_conflict_cost: Option<u32> = None;
             let mut lowest_cost_split_conflict_point = ProgPoint::before(Inst::new(0));
             let mut lowest_cost_split_conflict_reg = PReg::invalid();
+            let mut lowest_cost_split_conflict_cause = er::CAUSE_ORIGINAL;
 
             // Heuristic: start the scan for an available
             // register at an offset influenced both by our
@@ -1148,6 +1233,25 @@ impl<'a, F: Function> Env<'a, F> {
                             lowest_cost_split_conflict_cost = Some(conflict_cost + move_cost);
                             lowest_cost_split_conflict_point = first_conflict_point;
                             lowest_cost_split_conflict_reg = preg;
+                            if self.ctx.trace_reasons {
+                                // `bundles[0]` is the bundle met at
+                                // `first_conflict_point`.
+                                lowest_cost_split_conflict_cause =
+                                    if self.ctx.bundles[bundles[0]].cached_fixed() {
+                                        if self
+                                            .func
+                                            .inst_clobbers(first_conflict_point.inst())
+                                            .len()
+                                            == 0
+                                        {
+                                            er::CAUSE_CONFLICT_FIXED_OTHER
+                                        } else {
+                                            er::CAUSE_CONFLICT_FIXED_CALL
+                                        }
+                                    } else {
+                                        er::CAUSE_CONFLICT_BUNDLE
+                                    };
+                            }
                         }
                     }
                     AllocRegResult::ConflictWithFixed(max_cost, point) => {
@@ -1168,6 +1272,16 @@ impl<'a, F: Function> Env<'a, F> {
                             lowest_cost_split_conflict_cost = Some(max_cost + move_cost);
                             lowest_cost_split_conflict_point = point;
                             lowest_cost_split_conflict_reg = preg;
+                            if self.ctx.trace_reasons {
+                                let clobbers = self.func.inst_clobbers(point.inst());
+                                lowest_cost_split_conflict_cause = if clobbers.contains(preg) {
+                                    er::CAUSE_CALL_CLOBBER
+                                } else if clobbers.len() != 0 {
+                                    er::CAUSE_FIXED_RESV_AT_CALL
+                                } else {
+                                    er::CAUSE_FIXED_RESV_OTHER
+                                };
+                            }
                         }
                     }
                     AllocRegResult::ConflictHighCost => {
@@ -1330,6 +1444,7 @@ impl<'a, F: Function> Env<'a, F> {
                     split_at_point,
                     requeue_with_reg,
                     /* should_trim = */ true,
+                    lowest_cost_split_conflict_cause,
                 );
 
                 // Success, return scratch memory to context and finish

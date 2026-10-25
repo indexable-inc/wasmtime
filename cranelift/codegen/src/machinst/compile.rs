@@ -58,6 +58,8 @@ pub fn compile<B: LowerBackend + TargetIsa>(
             options.validate_ssa = true;
         }
 
+        options.trace_reasons = crate::ra_trace::enabled();
+
         options.algorithm = match b.flags().regalloc_algorithm() {
             RegallocAlgorithm::Backtracking => Algorithm::Ion,
             RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,

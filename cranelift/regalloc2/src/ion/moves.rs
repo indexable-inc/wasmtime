@@ -25,8 +25,8 @@ use crate::ion::data_structures::{
 use crate::ion::reg_traversal::RegTraversalIter;
 use crate::moves::{MoveAndScratchResolver, ParallelMoves};
 use crate::{
-    Allocation, Block, Edit, Function, FxHashMap, Inst, InstPosition, OperandConstraint,
-    OperandKind, OperandPos, PReg, ProgPoint, RegClass, SpillSlot,
+    edit_reason as er, Allocation, Block, Edit, Function, FxHashMap, Inst, InstPosition,
+    OperandConstraint, OperandKind, OperandPos, PReg, ProgPoint, RegClass, SpillSlot,
 };
 use alloc::format;
 use alloc::vec::Vec;
@@ -71,6 +71,40 @@ impl<'a, F: Function> Env<'a, F> {
             );
             self.ctx.spillslots[self.ctx.spillsets[bundledata.spillset].slot.index()].alloc
         }
+    }
+
+    /// Bench-only: the move reason (KIND, tag and SRC bits of
+    /// `edit_reason`; DIR is filled after move resolution) for a move from
+    /// `src` to `dst`. `src_at_end` / `dst_at_start` say whether the move
+    /// sits at the end of `src` / the start of `dst`, i.e. whether that LR's
+    /// boundary tag is the one this move implements.
+    fn move_reason(
+        &self,
+        kind: u16,
+        src: Option<LiveRangeIndex>,
+        src_at_end: bool,
+        dst: Option<LiveRangeIndex>,
+        dst_at_start: bool,
+    ) -> u16 {
+        if !self.ctx.trace_reasons {
+            return 0;
+        }
+        let mut pick = (0, er::SRC_DST_START);
+        let candidates = [
+            (dst.filter(|_| dst_at_start).map(|d| self.ctx.lr_tag(d)[0]), er::SRC_DST_START),
+            (src.filter(|_| src_at_end).map(|s| self.ctx.lr_tag(s)[1]), er::SRC_SRC_END),
+            (dst.map(|d| self.ctx.bundle_tag(self.ctx.ranges[d].bundle)), er::SRC_DST_BUNDLE),
+            (src.map(|s| self.ctx.bundle_tag(self.ctx.ranges[s].bundle)), er::SRC_SRC_BUNDLE),
+        ];
+        for (tag, which) in candidates {
+            if let Some(tag) = tag {
+                if er::tag_cause(tag) != er::CAUSE_ORIGINAL {
+                    pick = (tag, which);
+                    break;
+                }
+            }
+        }
+        er::encode(0, kind, pick.0, pick.1)
     }
 
     pub fn apply_allocations_and_insert_moves(&mut self) -> InsertedMoves {
@@ -223,6 +257,7 @@ impl<'a, F: Function> Env<'a, F> {
             to: Block,
             from: Block,
             alloc: Allocation,
+            lr: LiveRangeIndex,
         }
 
         impl InterBlockDest {
@@ -231,7 +266,8 @@ impl<'a, F: Function> Env<'a, F> {
             }
         }
 
-        let mut inter_block_sources: FxHashMap<Block, Allocation> = FxHashMap::default();
+        let mut inter_block_sources: FxHashMap<Block, (Allocation, LiveRangeIndex)> =
+            FxHashMap::default();
         let mut inter_block_dests = Vec::with_capacity(self.func.num_blocks());
 
         #[derive(Hash, Eq, PartialEq)]
@@ -252,6 +288,7 @@ impl<'a, F: Function> Env<'a, F> {
             to_block: Block,
             to_vreg: VRegIndex,
             alloc: Allocation,
+            lr: LiveRangeIndex,
         }
 
         impl BlockparamDest {
@@ -265,7 +302,7 @@ impl<'a, F: Function> Env<'a, F> {
         }
 
         let mut block_param_sources =
-            FxHashMap::<BlockparamSourceKey, Allocation>::with_capacity_and_hasher(
+            FxHashMap::<BlockparamSourceKey, (Allocation, LiveRangeIndex)>::with_capacity_and_hasher(
                 3 * self.func.num_insts(),
                 Default::default(),
             );
@@ -365,12 +402,20 @@ impl<'a, F: Function> Env<'a, F> {
                             vreg.index()
                         );
                         debug_assert_eq!(range.from.pos(), InstPosition::Before);
+                        let reason = self.move_reason(
+                            er::KIND_INTRA_BLOCK,
+                            Some(prev.index),
+                            prev.range.to == range.from,
+                            Some(entry.index),
+                            true,
+                        );
                         inserted_moves.push(
                             range.from,
                             InsertMovePrio::Regular,
                             prev_alloc,
                             alloc,
                             self.vreg(vreg),
+                            reason,
                         );
                     }
                 }
@@ -387,16 +432,17 @@ impl<'a, F: Function> Env<'a, F> {
                     }
                     trace!("examining block with end in range: block{}", block.index());
 
+                    let lr = entry.index;
                     match inter_block_sources.entry(block) {
                         // If the entry is already present in the map, we'll try to prefer a
                         // register allocation.
                         Entry::Occupied(mut entry) => {
-                            if !entry.get().is_reg() {
-                                entry.insert(alloc);
+                            if !entry.get().0.is_reg() {
+                                entry.insert((alloc, lr));
                             }
                         }
                         Entry::Vacant(entry) => {
-                            entry.insert(alloc);
+                            entry.insert((alloc, lr));
                         }
                     }
 
@@ -433,12 +479,12 @@ impl<'a, F: Function> Env<'a, F> {
                                 // As with inter-block moves, if the entry is already present we'll
                                 // try to prefer a register allocation.
                                 Entry::Occupied(mut entry) => {
-                                    if !entry.get().is_reg() {
-                                        entry.insert(alloc);
+                                    if !entry.get().0.is_reg() {
+                                        entry.insert((alloc, lr));
                                     }
                                 }
                                 Entry::Vacant(entry) => {
-                                    entry.insert(alloc);
+                                    entry.insert((alloc, lr));
                                 }
                             }
 
@@ -499,6 +545,7 @@ impl<'a, F: Function> Env<'a, F> {
                                 to_block,
                                 to_vreg,
                                 alloc,
+                                lr: entry.index,
                             });
                             trace!(
                                 "match: blockparam_in: v{} in block{} from block{} into {}",
@@ -553,6 +600,7 @@ impl<'a, F: Function> Env<'a, F> {
                             from: pred,
                             to: block,
                             alloc,
+                            lr: entry.index,
                         })
                     }
 
@@ -630,7 +678,7 @@ impl<'a, F: Function> Env<'a, F> {
                 let vreg = self.vreg(vreg);
                 trace!("processing inter-block moves for {}", vreg);
                 for dest in inter_block_dests.drain(..) {
-                    let src = inter_block_sources[&dest.from];
+                    let (src, src_lr) = inter_block_sources[&dest.from];
 
                     trace!(
                         " -> moving from {} to {} between {:?} and {:?}",
@@ -641,7 +689,16 @@ impl<'a, F: Function> Env<'a, F> {
                     );
 
                     let (pos, prio) = choose_move_location(self, dest.from, dest.to);
-                    inserted_moves.push(pos, prio, src, dest.alloc, vreg);
+                    let reason = self.move_reason(
+                        er::KIND_EDGE,
+                        Some(src_lr),
+                        self.ctx.ranges[src_lr].range.to
+                            == self.cfginfo.block_exit[dest.from.index()].next(),
+                        Some(dest.lr),
+                        self.ctx.ranges[dest.lr].range.from
+                            == self.cfginfo.block_entry[dest.to.index()],
+                    );
+                    inserted_moves.push(pos, prio, src, dest.alloc, vreg, reason);
                 }
             }
 
@@ -655,9 +712,25 @@ impl<'a, F: Function> Env<'a, F> {
             trace!("processing block-param moves");
             for dest in block_param_dests {
                 let src = dest.source();
-                let src_alloc = block_param_sources.get(&src).unwrap();
+                let (src_alloc, src_lr) = *block_param_sources.get(&src).unwrap();
                 let (pos, prio) = choose_move_location(self, dest.from_block, dest.to_block);
-                inserted_moves.push(pos, prio, *src_alloc, dest.alloc, self.vreg(dest.to_vreg));
+                let reason = self.move_reason(
+                    er::KIND_BLOCKPARAM,
+                    Some(src_lr),
+                    self.ctx.ranges[src_lr].range.to
+                        == self.cfginfo.block_exit[dest.from_block.index()].next(),
+                    Some(dest.lr),
+                    self.ctx.ranges[dest.lr].range.from
+                        == self.cfginfo.block_entry[dest.to_block.index()],
+                );
+                inserted_moves.push(
+                    pos,
+                    prio,
+                    src_alloc,
+                    dest.alloc,
+                    self.vreg(dest.to_vreg),
+                    reason,
+                );
             }
         }
 
@@ -676,7 +749,15 @@ impl<'a, F: Function> Env<'a, F> {
                 FixedRegFixupLevel::Initial => InsertMovePrio::MultiFixedRegInitial,
                 FixedRegFixupLevel::Secondary => InsertMovePrio::MultiFixedRegSecondary,
             };
-            inserted_moves.push(fixup.pos, prio, from_alloc, to_alloc, self.vreg(fixup.vreg));
+            let reason = self.move_reason(er::KIND_MULTI_FIXED_FIXUP, None, false, None, false);
+            inserted_moves.push(
+                fixup.pos,
+                prio,
+                from_alloc,
+                to_alloc,
+                self.vreg(fixup.vreg),
+                reason,
+            );
             self.set_alloc(
                 fixup.pos.inst(),
                 fixup.to_slot as usize,
@@ -755,12 +836,15 @@ impl<'a, F: Function> Env<'a, F> {
                             );
                         }
                         let input_operand = self.func.inst_operands(inst)[input_idx];
+                        let reason =
+                            self.move_reason(er::KIND_REUSE_FIXUP, None, false, None, false);
                         inserted_moves.push(
                             ProgPoint::before(inst),
                             InsertMovePrio::ReusedInput,
                             input_alloc,
                             output_alloc,
                             input_operand.vreg(),
+                            reason,
                         );
                         self.set_alloc(inst, input_idx, output_alloc);
                     }
@@ -1065,12 +1149,45 @@ impl<'a, F: Function> Env<'a, F> {
                 }
 
                 for (src, dst, to_vreg) in resolved {
+                    // Bench-only: attribute each resolved move (including
+                    // cycle-breaking and stack-to-stack scratch moves) to
+                    // the original parallel move it implements.
+                    let reason = if self.ctx.trace_reasons {
+                        match to_vreg {
+                            None => er::encode(0, er::KIND_SCRATCH_SAVE, 0, 0),
+                            Some(v) => moves
+                                .iter()
+                                .find(|m| m.to_vreg == v && m.to_alloc == dst)
+                                .or_else(|| {
+                                    moves.iter().find(|m| m.to_vreg == v && m.from_alloc == src)
+                                })
+                                .or_else(|| moves.iter().find(|m| m.to_vreg == v))
+                                .map(|m| m.reason)
+                                .unwrap_or(er::encode(0, er::KIND_UNKNOWN, 0, 0)),
+                        }
+                    } else {
+                        0
+                    };
                     let src = rewrites.get(&src).cloned().unwrap_or(src);
                     let dst = rewrites.get(&dst).cloned().unwrap_or(dst);
                     trace!("  resolved: {} -> {} ({:?})", src, dst, to_vreg);
                     let action = redundant_moves.process_move(src, dst, to_vreg);
                     if !action.elide {
-                        edits.add(pos_prio, src, dst);
+                        if self.ctx.trace_reasons {
+                            let is_stack = |a: Allocation| match a.as_reg() {
+                                Some(preg) => self.pregs[preg.index()].is_stack,
+                                None => a.is_stack(),
+                            };
+                            let dir = match (is_stack(src), is_stack(dst)) {
+                                (false, false) => er::DIR_REG_REG,
+                                (false, true) => er::DIR_REG_STACK,
+                                (true, false) => er::DIR_STACK_REG,
+                                (true, true) => er::DIR_STACK_STACK,
+                            };
+                            edits.add(pos_prio.with_reason(reason | dir), src, dst);
+                        } else {
+                            edits.add(pos_prio, src, dst);
+                        }
                     } else {
                         trace!("    -> redundant move elided");
                     }

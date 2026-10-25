@@ -514,6 +514,28 @@ impl wasmtime_environ::Compiler for Compiler {
         let (namespace, index) = key.into_raw_parts();
         context.func.name = UserFuncName::User(UserExternalName { namespace, index });
 
+        // Bench-only regalloc move trace: record how this function will be
+        // named in jitdump/perfmap (`ProfilingAgent::register_module` uses the
+        // demangled name-section name when there is one, else the symbol).
+        if let Some(dir) = cranelift_codegen::ra_trace::trace_dir() {
+            let jit_name = match translation.debuginfo.name_section.func_names.get(&func_index) {
+                Some(name) => {
+                    let mut s = String::new();
+                    wasmtime_environ::demangle_function_name(&mut s, name).unwrap();
+                    s
+                }
+                None => symbol.to_string(),
+            };
+            let stem = cranelift_codegen::ra_trace::file_stem(&context.func.name);
+            let body = format!(
+                "{symbol}\t{jit_name}\t{}\t{}\n",
+                module_index.as_u32(),
+                def_func_index.as_u32()
+            );
+            std::fs::write(dir.join(format!("{stem}.sym")), body)
+                .unwrap_or_else(|e| panic!("CRANELIFT_RA_TRACE_DIR: {stem}.sym: {e}"));
+        }
+
         if self.tunables.debug_native {
             context.func.collect_debug_info();
         }
