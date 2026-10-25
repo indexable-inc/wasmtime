@@ -25,6 +25,7 @@ use target_lexicon::Triple;
 mod abi;
 mod inst;
 mod lower;
+mod pcc;
 pub mod settings;
 
 #[cfg(feature = "unwind")]

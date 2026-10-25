@@ -28,4 +28,6 @@ where
         // Pulley does not support this feature right now.
         None
     }
+
+    type FactFlowState = ();
 }

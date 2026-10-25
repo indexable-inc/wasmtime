@@ -19,6 +19,7 @@
 
 use crate::CodegenError;
 use crate::FxHashMap;
+use crate::ir::pcc::*;
 use crate::ir::{self, Constant, ConstantData, ValueLabel, types};
 use crate::ranges::Ranges;
 use crate::timing;
@@ -202,6 +203,17 @@ pub struct VCode<I: VCodeInst> {
     debug_value_labels: Vec<(VReg, InsnIndex, InsnIndex, u32)>,
 
     pub(crate) sigs: SigSet,
+
+    /// Facts on VRegs, for proof-carrying code verification.
+    facts: Vec<Option<Fact>>,
+
+    /// PCC: for each vreg whose stated fact is a `Def`, the fact the checker
+    /// derived at its definition (a verified fact about its value).
+    def_shadows: FxHashMap<VReg, Fact>,
+
+    /// PCC: while set, a `Def` vreg read as an input means its derived fact
+    /// (`def_shadows`) instead of its symbol. See `check_vcode_facts`.
+    pub(crate) pcc_numeric: bool,
 
     log2_min_function_alignment: u8,
 }
@@ -562,6 +574,7 @@ impl<I: VCodeInst> VCodeBuilder<I> {
     /// Build the final VCode.
     pub fn build(mut self, mut vregs: VRegAllocator<I>) -> VCode<I> {
         self.vcode.vreg_types = take(&mut vregs.vreg_types);
+        self.vcode.facts = take(&mut vregs.facts);
 
         if self.direction == VCodeBuildDirection::Backward {
             self.reverse_and_finalize(&vregs);
@@ -585,6 +598,19 @@ impl<I: VCodeInst> VCodeBuilder<I> {
         // Debug value labels are resolved in reverse_and_finalize.
         vregs.debug_assert_no_vreg_aliases(
             self.vcode.debug_value_labels.iter().map(|&(vreg, ..)| vreg),
+        );
+        // Facts are resolved eagerly during set_vreg_alias.
+        vregs.debug_assert_no_vreg_aliases(
+            self.vcode
+                .facts
+                .iter()
+                .zip(&self.vcode.vreg_types)
+                .enumerate()
+                .filter(|(_, (fact, _))| fact.is_some())
+                .map(|(vreg, (_, ty))| {
+                    let (regclasses, _) = I::rc_for_type(ty).unwrap();
+                    VReg::new(vreg, regclasses[0])
+                }),
         );
 
         self.vcode
@@ -650,6 +676,9 @@ impl<I: VCodeInst> VCode<I> {
             emit_info,
             constants,
             debug_value_labels: vec![],
+            facts: vec![],
+            def_shadows: FxHashMap::default(),
+            pcc_numeric: false,
             log2_min_function_alignment,
         }
     }
@@ -1511,6 +1540,51 @@ impl<I: VCodeInst> VCode<I> {
         self.block_order.lowered_order()[block.index()].orig_block()
     }
 
+    /// Get the type of a VReg.
+    pub fn vreg_type(&self, vreg: VReg) -> Type {
+        self.vreg_types[vreg.vreg()]
+    }
+
+    /// Get the fact, if any, for a given VReg.
+    pub fn vreg_fact(&self, vreg: VReg) -> Option<&Fact> {
+        self.facts[vreg.vreg()].as_ref()
+    }
+
+    /// Set the fact for a given VReg.
+    pub fn set_vreg_fact(&mut self, vreg: VReg, fact: Fact) {
+        trace!("set fact on {}: {:?}", vreg, fact);
+        self.facts[vreg.vreg()] = Some(fact);
+    }
+
+    /// PCC: record the fact derived at the definition of a `Def` vreg.
+    pub fn set_def_shadow(&mut self, vreg: VReg, fact: Fact) {
+        self.def_shadows.insert(vreg, fact);
+    }
+
+    /// PCC: the fact derived at the definition of a `Def` vreg, if any.
+    pub fn def_shadow(&self, vreg: VReg) -> Option<&Fact> {
+        self.def_shadows.get(&vreg)
+    }
+
+    /// The registers an instruction defines that carry facts.
+    pub fn inst_defs_with_facts(&self, inst: InsnIndex) -> SmallVec<[VReg; 2]> {
+        self.inst_operands(inst)
+            .iter()
+            .filter(|o| o.kind() == OperandKind::Def)
+            .map(|o| o.vreg())
+            .filter(|vreg| self.facts[vreg.vreg()].is_some())
+            .collect()
+    }
+
+    /// Does a given instruction define any facts?
+    pub fn inst_defines_facts(&self, inst: InsnIndex) -> bool {
+        self.inst_operands(inst)
+            .iter()
+            .filter(|o| o.kind() == OperandKind::Def)
+            .map(|o| o.vreg())
+            .any(|vreg| self.facts[vreg.vreg()].is_some())
+    }
+
     /// Get the user stack map associated with the given forward instruction index.
     pub fn get_user_stack_map(&self, inst: InsnIndex) -> Option<&ir::UserStackMap> {
         let index = inst.to_backwards_insn_index(self.num_insts());
@@ -1627,6 +1701,12 @@ impl<I: VCodeInst> Debug for VRegAllocator<I> {
             writeln!(f, "  {:?} := {:?}", Reg::from(key), Reg::from(*dest))?;
         }
 
+        for (vreg, fact) in self.facts.iter().enumerate() {
+            if let Some(fact) = fact {
+                writeln!(f, "  v{vreg} ! {fact}")?;
+            }
+        }
+
         writeln!(f, "}}")
     }
 }
@@ -1664,6 +1744,15 @@ impl<I: VCodeInst> fmt::Debug for VCode<I> {
                     inst,
                     self.insts[inst].pretty_print_inst(&mut state)
                 )?;
+                if !self.operands.is_empty() {
+                    for operand in self.inst_operands(InsnIndex::new(inst)) {
+                        if operand.kind() == OperandKind::Def {
+                            if let Some(fact) = &self.facts[operand.vreg().vreg()] {
+                                writeln!(f, "    v{} ! {}", operand.vreg().vreg(), fact)?;
+                            }
+                        }
+                    }
+                }
                 if let Some(user_stack_map) = self.get_user_stack_map(InsnIndex::new(inst)) {
                     writeln!(f, "    {user_stack_map:?}")?;
                 }
@@ -1694,6 +1783,9 @@ pub struct VRegAllocator<I> {
     /// lowering rules) or some ABI code.
     deferred_error: Option<CodegenError>,
 
+    /// Facts on VRegs, for proof-carrying code.
+    facts: Vec<Option<Fact>>,
+
     /// The type of instruction that this allocator makes registers for.
     _inst: core::marker::PhantomData<I>,
 }
@@ -1708,6 +1800,7 @@ impl<I: VCodeInst> VRegAllocator<I> {
             vreg_types,
             vreg_aliases: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
             deferred_error: None,
+            facts: Vec::with_capacity(capacity),
             _inst: core::marker::PhantomData::default(),
         }
     }
@@ -1746,6 +1839,9 @@ impl<I: VCodeInst> VRegAllocator<I> {
             debug_assert_eq!(self.vreg_types.len(), vreg.index());
             self.vreg_types.push(reg_ty);
         }
+
+        // Create empty facts for each allocated vreg.
+        self.facts.resize(self.vreg_types.len(), None);
 
         Ok(regs)
     }
@@ -1789,6 +1885,28 @@ impl<I: VCodeInst> VRegAllocator<I> {
         // Disallow cycles (see below).
         assert_ne!(resolved_to, from);
 
+        // Maintain the invariant that PCC facts only exist on vregs
+        // which aren't aliases. We want to preserve whatever was
+        // stated about the vreg before its producer was lowered.
+        // Two CLIF values can share one vreg (a no-op `uextend` of a value
+        // whose 32-bit producer already zero-extends), each with its own
+        // fact: keep both by intersecting, which keeps a symbolic `Def` over
+        // a numeric range (the checker derives the range again for uses that
+        // need it). Facts that do not intersect (a pointer fact and a
+        // constant range of the same zero) keep the incoming one. Either way
+        // the kept fact is checked at the vreg's def, so this choice only
+        // affects what can be proven, never soundness.
+        if let Some(fact) = self.facts[from.vreg()].take() {
+            let fact = match &self.facts[resolved_to.vreg()] {
+                Some(old) => match crate::ir::pcc::Fact::intersect(old, &fact) {
+                    crate::ir::pcc::Fact::Conflict => fact,
+                    merged => merged,
+                },
+                None => fact,
+            };
+            self.set_fact(resolved_to, fact);
+        }
+
         let old_alias = self.vreg_aliases.insert(from, resolved_to);
         debug_assert_eq!(old_alias, None);
     }
@@ -1812,6 +1930,42 @@ impl<I: VCodeInst> VRegAllocator<I> {
     #[inline]
     fn debug_assert_no_vreg_aliases(&self, mut list: impl Iterator<Item = VReg>) {
         debug_assert!(list.all(|vreg| !self.vreg_aliases.contains_key(&vreg)));
+    }
+
+    /// Set the proof-carrying code fact on a given virtual register.
+    ///
+    /// Returns the old fact, if any (only one fact can be stored).
+    fn set_fact(&mut self, vreg: regalloc2::VReg, fact: Fact) -> Option<Fact> {
+        trace!("vreg {:?} has fact: {:?}", vreg, fact);
+        debug_assert!(!self.vreg_aliases.contains_key(&vreg));
+        self.facts[vreg.vreg()].replace(fact)
+    }
+
+    /// Set a fact only if one doesn't already exist.
+    pub fn set_fact_if_missing(&mut self, vreg: VirtualReg, fact: Fact) {
+        let vreg = self.resolve_vreg_alias(vreg.into());
+        if self.facts[vreg.vreg()].is_none() {
+            self.set_fact(vreg, fact);
+        }
+    }
+
+    /// Allocate a fresh ValueRegs, with a given fact to apply if
+    /// the value fits in one VReg.
+    pub fn alloc_with_maybe_fact(
+        &mut self,
+        ty: Type,
+        fact: Option<Fact>,
+    ) -> CodegenResult<ValueRegs<Reg>> {
+        let result = self.alloc(ty)?;
+
+        // Ensure that we don't lose a fact on a value that splits
+        // into multiple VRegs.
+        assert!(result.len() == 1 || fact.is_none());
+        if let Some(fact) = fact {
+            self.set_fact(result.regs()[0].into(), fact);
+        }
+
+        Ok(result)
     }
 }
 

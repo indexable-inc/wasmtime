@@ -14,6 +14,9 @@ pub enum Amode<R: AsReg> {
         base: R,
         simm32: AmodeOffsetPlusKnownOffset,
         trap: Option<TrapCode>,
+        /// Whether Cranelift's proof-carrying-code checker must prove this
+        /// access in bounds (the `checked` memory flag). Not encoded.
+        checked: bool,
     },
     ImmRegRegShift {
         base: R,
@@ -21,6 +24,8 @@ pub enum Amode<R: AsReg> {
         scale: Scale,
         simm32: AmodeOffset,
         trap: Option<TrapCode>,
+        /// See `ImmReg::checked`.
+        checked: bool,
     },
     RipRelative {
         target: DeferredTarget,
@@ -33,6 +38,14 @@ impl<R: AsReg> Amode<R> {
         match self {
             Amode::ImmReg { trap, .. } | Amode::ImmRegRegShift { trap, .. } => *trap,
             Amode::RipRelative { .. } => None,
+        }
+    }
+
+    /// Whether this access must be proven in bounds by proof-carrying code.
+    pub fn checked(&self) -> bool {
+        match self {
+            Amode::ImmReg { checked, .. } | Amode::ImmRegRegShift { checked, .. } => *checked,
+            Amode::RipRelative { .. } => false,
         }
     }
 
@@ -74,6 +87,38 @@ impl<R: AsReg> Amode<R> {
             Amode::ImmRegRegShift { base, index, .. } => (Some(base.enc()), Some(index.enc())),
             Amode::RipRelative { .. } => (None, None),
         }
+    }
+}
+
+/// How an instruction uses its memory operand; see [`PccMem`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PccMemKind {
+    /// The instruction reads memory.
+    Load,
+    /// The instruction writes memory.
+    Store,
+    /// The instruction reads and writes memory.
+    LoadStore,
+    /// The instruction only computes the address (`lea`, `nop`).
+    AddressOnly,
+}
+
+/// An instruction's memory operand, as seen by Cranelift's
+/// proof-carrying-code checker: the address, how many bytes are accessed at
+/// it, and how.
+#[derive(Copy, Clone, Debug)]
+pub struct PccMem<'a, R: AsReg> {
+    pub amode: &'a Amode<R>,
+    pub bytes: u8,
+    pub kind: PccMemKind,
+}
+
+#[doc(hidden)]
+pub fn pcc_note_write(acc: &mut Option<u16>, mixed: &mut bool, bits: u16) {
+    match *acc {
+        None => *acc = Some(bits),
+        Some(b) if b == bits => {}
+        Some(_) => *mixed = true,
     }
 }
 
@@ -241,6 +286,12 @@ impl Scale {
             0b11 => Scale::Eight,
             _ => panic!("invalid scale encoding: {enc}"),
         }
+    }
+
+    /// The shift amount (log2 of the scale factor).
+    #[must_use]
+    pub fn log2(&self) -> u8 {
+        self.enc()
     }
 
     /// Return the hardware encoding of this [`Scale`].

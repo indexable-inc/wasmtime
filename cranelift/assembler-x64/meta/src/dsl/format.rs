@@ -278,6 +278,7 @@ impl From<Location> for Operand {
 }
 
 /// The kind of register used in a [`Location`].
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RegClass {
     Gpr,
     Xmm,

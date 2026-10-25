@@ -79,7 +79,8 @@ pub use fixed::Fixed;
 pub use gpr::{Gpr, NonRspGpr, Size};
 pub use imm::{Extension, Imm8, Imm16, Imm32, Imm64, Simm8, Simm16, Simm32};
 pub use mem::{
-    Amode, AmodeOffset, AmodeOffsetPlusKnownOffset, DeferredTarget, GprMem, Scale, XmmMem,
+    Amode, AmodeOffset, AmodeOffsetPlusKnownOffset, DeferredTarget, GprMem, PccMem, PccMemKind,
+    Scale, XmmMem, pcc_note_write,
 };
 pub use rex::RexPrefix;
 pub use xmm::Xmm;

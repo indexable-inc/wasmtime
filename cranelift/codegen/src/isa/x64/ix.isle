@@ -25,7 +25,7 @@
 ;; `hint` is write | locality << 1. Reads map locality 3..0 onto
 ;; prefetcht0, t1, t2 and nta; any write is prefetchw.
 (decl ix_prefetch_amode (Value) SyntheticAmode)
-(rule (ix_prefetch_amode p) (to_amode (mem_flags_trusted_data) p (zero_offset)))
+(rule (ix_prefetch_amode p) (to_amode (mem_flags_pcc_checked_data) p (zero_offset)))
 (rule 1 (lower (ix_prefetch p (u8_from_uimm8 6))) (side_effect (x64_prefetcht0_m (ix_prefetch_amode p))))
 (rule 1 (lower (ix_prefetch p (u8_from_uimm8 4))) (side_effect (x64_prefetcht1_m (ix_prefetch_amode p))))
 (rule 1 (lower (ix_prefetch p (u8_from_uimm8 2))) (side_effect (x64_prefetcht2_m (ix_prefetch_amode p))))

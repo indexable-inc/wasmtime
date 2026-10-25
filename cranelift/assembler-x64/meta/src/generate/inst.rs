@@ -71,6 +71,111 @@ impl dsl::Inst {
             self.generate_features_function(f);
             f.empty_line();
             self.generate_num_registers_function(f);
+            f.empty_line();
+            self.generate_pcc_functions(f);
+        });
+    }
+
+    /// `fn pcc_mem(&self) -> Option<PccMem>` and
+    /// `fn pcc_gpr_write_bits(&self) -> Option<u16>`, the operand summary
+    /// Cranelift's proof-carrying-code checker works from.
+    fn generate_pcc_functions(&self, f: &mut Formatter) {
+        use dsl::OperandKind::*;
+        let mnemonic = self.mnemonic.as_str();
+        let address_only = mnemonic.starts_with("lea") || mnemonic.starts_with("nop");
+        fmtln!(f, "/// This instruction's memory operand, for proof-carrying code.");
+        fmtln!(f, "#[must_use]");
+        let sig = if self.requires_generic() {
+            "pub fn pcc_mem(&self) -> Option<crate::PccMem<'_, R::ReadGpr>>"
+        } else {
+            "pub fn pcc_mem<M: AsReg>(&self) -> Option<crate::PccMem<'_, M>>"
+        };
+        f.add_block(
+            sig,
+            |f| match self.format.operands.iter().find(|o| o.location.uses_memory()) {
+                None => fmtln!(f, "None"),
+                Some(o) => {
+                    let loc = o.location;
+                    // The byte and word lane moves name their memory operand
+                    // `rm32` (see `instructions/lanes.rs`), but access only
+                    // 1 or 2 bytes.
+                    let bytes = match mnemonic {
+                        "pextrb" | "vpextrb" | "pinsrb" | "vpinsrb" => 1,
+                        "pextrw" | "vpextrw" | "pinsrw" | "vpinsrw" => 2,
+                        _ => loc.bits() / 8,
+                    };
+                    let kind = if address_only {
+                        "AddressOnly"
+                    } else {
+                        match o.mutability {
+                            dsl::Mutability::Read => "Load",
+                            dsl::Mutability::Write => "Store",
+                            dsl::Mutability::ReadWrite => "LoadStore",
+                        }
+                    };
+                    let make = format!(
+                        "Some(crate::PccMem {{ amode, bytes: {bytes}, kind: crate::PccMemKind::{kind} }})"
+                    );
+                    match loc.kind() {
+                        Mem(_) => {
+                            fmtln!(f, "let amode = &self.{loc};");
+                            fmtln!(f, "{make}");
+                        }
+                        RegMem(_) => {
+                            let ty = loc.reg_class().unwrap();
+                            fmtln!(f, "match &self.{loc} {{");
+                            f.indent(|f| {
+                                fmtln!(f, "crate::{ty}Mem::Mem(amode) => {make},");
+                                fmtln!(f, "_ => None,");
+                            });
+                            fmtln!(f, "}}");
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+            },
+        );
+        f.empty_line();
+        fmtln!(
+            f,
+            "/// The width of every general-purpose register this instruction writes,"
+        );
+        fmtln!(
+            f,
+            "/// if they all have the same width; `None` if it writes none, mixes widths,"
+        );
+        fmtln!(f, "/// or has custom operand handling.");
+        fmtln!(f, "#[must_use]");
+        f.add_block("pub fn pcc_gpr_write_bits(&self) -> Option<u16>", |f| {
+            if self.custom.contains(dsl::Customization::Visit) {
+                fmtln!(f, "None");
+                return;
+            }
+            fmtln!(f, "#[allow(unused_mut, reason = \"generated code\")]");
+            fmtln!(f, "let mut acc: Option<u16> = None;");
+            fmtln!(f, "#[allow(unused_mut, reason = \"generated code\")]");
+            fmtln!(f, "let mut mixed = false;");
+            for o in &self.format.operands {
+                if !o.mutability.is_write() || o.location.reg_class() != Some(dsl::RegClass::Gpr) {
+                    continue;
+                }
+                let loc = o.location;
+                let bits = loc.bits();
+                match loc.kind() {
+                    FixedReg(_) | Reg(_) => {
+                        fmtln!(f, "crate::pcc_note_write(&mut acc, &mut mixed, {bits});");
+                    }
+                    RegMem(_) => {
+                        fmtln!(f, "if let crate::GprMem::Gpr(_) = &self.{loc} {{");
+                        f.indent(|f| {
+                            fmtln!(f, "crate::pcc_note_write(&mut acc, &mut mixed, {bits});");
+                        });
+                        fmtln!(f, "}}");
+                    }
+                    _ => {}
+                }
+            }
+            fmtln!(f, "if mixed {{ None }} else {{ acc }}");
         });
     }
 

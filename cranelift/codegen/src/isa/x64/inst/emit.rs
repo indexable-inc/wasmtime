@@ -1766,6 +1766,7 @@ pub(crate) fn emit(
                 base: Gpr::RDI,
                 simm32: asm::AmodeOffsetPlusKnownOffset::ZERO,
                 trap: None,
+                checked: false,
             })
             .emit(sink, info, state);
         }
@@ -2165,6 +2166,7 @@ fn emit_lea<S>(
                     offset: None,
                 },
             trap: None,
+            checked: _,
         } if dst.as_ref().to_reg() == base => add_mi(
             PairedGpr {
                 read: base,
@@ -2184,6 +2186,7 @@ fn emit_lea<S>(
             scale: asm::Scale::One,
             simm32: asm::AmodeOffset::ZERO,
             trap: None,
+            checked: _,
         } => {
             if dst.as_ref().to_reg() == base {
                 add_rm(

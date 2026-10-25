@@ -173,6 +173,21 @@
 (decl put_in_regs_vec (ValueSlice) ValueRegsVec)
 (extern constructor put_in_regs_vec put_in_regs_vec)
 
+;; If the given reg is a real register, cause the value in reg to be in a virtual
+;; reg, by copying it into a new virtual reg.
+(decl ensure_in_vreg (Reg Type) Reg)
+(extern constructor ensure_in_vreg ensure_in_vreg)
+
+;; Add a range fact to a register, when compiling with
+;; proof-carrying-code enabled.
+;; Trusted flags, plus `checked` when PCC is on (for accesses whose
+;; address the translator gave facts, such as `ix_prefetch`).
+(decl mem_flags_pcc_checked_data () MemFlagsData)
+(extern constructor mem_flags_pcc_checked_data mem_flags_pcc_checked_data)
+
+(decl add_range_fact (Reg u16 u64 u64) Reg)
+(extern constructor add_range_fact add_range_fact)
+
 ;; Get the `n`th register inside a `ValueRegs`.
 (spec (value_regs_get regs index)
       (provide

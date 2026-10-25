@@ -140,6 +140,11 @@ macro_rules! isle_lower_prelude_methods {
         }
 
         #[inline]
+        fn ensure_in_vreg(&mut self, reg: Reg, ty: Type) -> Reg {
+            self.lower_ctx.ensure_in_vreg(reg, ty)
+        }
+
+        #[inline]
         fn value_regs_get(&mut self, regs: ValueRegs, i: usize) -> Reg {
             regs.regs()[i]
         }
@@ -808,6 +813,21 @@ macro_rules! isle_lower_prelude_methods {
 
         fn jump_table_size(&mut self, targets: &BoxVecMachLabel) -> u32 {
             targets.len() as u32
+        }
+
+        fn mem_flags_pcc_checked_data(&mut self) -> MemFlagsData {
+            // Checked (so the PCC checker must prove the access) only when
+            // PCC is on: the translator attaches facts in that case only.
+            if self.backend.flags().enable_pcc() {
+                MemFlagsData::trusted().with_checked()
+            } else {
+                MemFlagsData::trusted()
+            }
+        }
+
+        fn add_range_fact(&mut self, reg: Reg, bits: u16, min: u64, max: u64) -> Reg {
+            self.lower_ctx.add_range_fact(reg, bits, min, max);
+            reg
         }
 
         fn value_is_unused(&mut self, val: Value) -> bool {

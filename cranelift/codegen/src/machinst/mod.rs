@@ -79,12 +79,16 @@ const BIT_LITTLE_ENDIAN: u16 = 1 << 2;
 /// Load multi-byte values from memory in a big-endian format.
 const BIT_BIG_ENDIAN: u16 = 1 << 3;
 
+/// Check this load or store for safety when using the proof-carrying-code
+/// framework. The address must have a `PointsTo` fact attached with a
+/// sufficiently large valid range for the accessed size.
+const BIT_CHECKED: u16 = 1 << 4;
+
 /// A load that must be performed every time it is reached, and whose value
 /// is never assumed: it is never merged with another access, never
 /// forwarded from a store, never hoisted and never deleted.
 ///
-/// Bit 5, not 4: the ix fork's proof-carrying-code branch (ix-pcc) uses bit 4
-/// for `BIT_CHECKED`.
+/// Bit 5, not 4: bit 4 is `BIT_CHECKED`.
 const BIT_VOLATILE: u16 = 1 << 5;
 
 /// Trap code, if any, for this memory operation.
@@ -131,7 +135,7 @@ pub struct MachMemFlags {
     // - Bit 1: readonly
     // - Bit 2: little-endian
     // - Bit 3: big-endian
-    // - Bit 4: unused here (checked, on the ix-pcc branch)
+    // - Bit 4: checked (proof-carrying code)
     // - Bit 5: volatile
     // - Bit 6: unused
     // - Bits 7..14: trap code
@@ -226,6 +230,16 @@ impl MachMemFlags {
         self.read_bit(BIT_READONLY)
     }
 
+    /// Test if the `checked` (proof-carrying code) flag is set.
+    pub const fn checked(self) -> bool {
+        self.read_bit(BIT_CHECKED)
+    }
+
+    /// Set the `checked` flag, returning new flags.
+    pub const fn with_checked(self) -> Self {
+        self.with_bit(BIT_CHECKED)
+    }
+
     /// Set the `readonly` flag, returning new flags.
     pub const fn with_readonly(self) -> Self {
         self.with_bit(BIT_READONLY)
@@ -287,6 +301,9 @@ impl fmt::Display for MachMemFlags {
         if self.read_bit(BIT_LITTLE_ENDIAN) {
             write!(f, " little")?;
         }
+        if self.checked() {
+            write!(f, " checked")?;
+        }
         Ok(())
     }
 }
@@ -311,6 +328,7 @@ pub use helpers::*;
 pub mod valueregs;
 pub use reg::*;
 pub use valueregs::*;
+pub mod pcc;
 pub mod reg;
 
 /// A machine instruction.

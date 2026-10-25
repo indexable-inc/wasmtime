@@ -88,6 +88,15 @@ fn generate_inst_impls(f: &mut Formatter, insts: &[dsl::Inst]) {
         f.add_block("pub fn num_registers_available(&self) -> usize", |f| {
             match_variants(f, insts, "num_registers_available()");
         });
+        f.add_block(
+            "pub fn pcc_mem(&self) -> Option<crate::PccMem<'_, R::ReadGpr>>",
+            |f| {
+                match_variants(f, insts, "pcc_mem()");
+            },
+        );
+        f.add_block("pub fn pcc_gpr_write_bits(&self) -> Option<u16>", |f| {
+            match_variants(f, insts, "pcc_gpr_write_bits()");
+        });
     });
 }
 

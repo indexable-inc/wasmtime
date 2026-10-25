@@ -346,6 +346,7 @@ impl From<SyntheticAmode> for asm::Amode<Gpr> {
                     offset: Some(offsets::KEY_INCOMING_ARG),
                 },
                 trap: None,
+                checked: false,
             },
             SyntheticAmode::SlotOffset { simm32 } => asm::Amode::ImmReg {
                 base: Gpr::RSP,
@@ -354,6 +355,7 @@ impl From<SyntheticAmode> for asm::Amode<Gpr> {
                     offset: Some(offsets::KEY_SLOT_OFFSET),
                 },
                 trap: None,
+                checked: false,
             },
             SyntheticAmode::ConstantOffset(vcode_constant) => asm::Amode::RipRelative {
                 target: asm::DeferredTarget::Constant(asm::Constant(vcode_constant.as_u32())),
@@ -376,6 +378,7 @@ impl From<Amode> for asm::Amode<Gpr> {
                 },
                 base: Gpr::unwrap_new(base),
                 trap: flags.trap_code().map(Into::into),
+                checked: flags.checked(),
             },
             Amode::ImmRegRegShift {
                 simm32,
@@ -389,6 +392,7 @@ impl From<Amode> for asm::Amode<Gpr> {
                 scale: asm::Scale::new(shift),
                 simm32: simm32.into(),
                 trap: flags.trap_code().map(Into::into),
+                checked: flags.checked(),
             },
             Amode::RipRelative { target } => asm::Amode::RipRelative {
                 target: asm::DeferredTarget::Label(asm::Label(target.as_u32())),
