@@ -363,14 +363,21 @@ fn passive_elem_segment_drop(
 
 // Implementation of `memory.copy`.
 //
-// The compiled site has already bounds-checked both whole ranges (an
-// out-of-bounds op traps there, before this call, with nothing written), so
-// `dst..dst+len` and `src..src+len` are in bounds here.
+// Callers (Cranelift and Winch): `memory.copy`, `memory.init`, `table.copy`
+// of tables whose elements are plain words, and GC `array.copy` /
+// `array.new_data` of non-reference elements; `memory_fill` serves
+// `memory.fill` and byte-wise `array.fill`. Every caller has already
+// bounds-checked the whole range(s) (an out-of-bounds op traps there, before
+// this call, with nothing written), so `dst..dst+len` and `src..src+len` are
+// in bounds here.
 //
 // ix fork: an op of `BULK_CHUNKED_MIN` bytes or more is done in
-// `BULK_CHUNK`-byte pieces with a preemption check between pieces (see
-// `bulk_preempt`), so a multi-GiB copy cannot hold the thread for its whole
-// length. Smaller ops are one memmove, as upstream.
+// `BULK_CHUNK`-byte pieces (`BULK_COPY_FAR_CHUNK` for a non-overlapping
+// copy) with a preemption check between pieces (see
+// `bulk_preempt`), so a multi-GiB op cannot hold the thread for its whole
+// length. On an interrupt the op stops part-way, which is allowed only
+// because the trap is `Trap::Interrupt`: every other outcome is all or
+// nothing, as upstream. Smaller ops are one memmove, as upstream.
 unsafe fn memory_copy(
     store: &mut dyn VMStore,
     _instance: InstanceId,
@@ -415,6 +422,19 @@ const BULK_CHUNKED_MIN: usize = 2 << 20;
 /// ix fork: the size of one chunk (1 MiB). At ~10-30 GB/s that is about
 /// 30-100 us between preemption checks.
 const BULK_CHUNK: usize = 1 << 20;
+/// ix fork: the chunk for a copy whose ranges do not overlap, on x86_64
+/// (64 MiB, about 2 ms at the ~30 GB/s measured on EPYC 9R45). glibc's
+/// x86 memmove switches to non-temporal stores at
+/// `x86_non_temporal_threshold` (24 MiB on that host, derived from the L3
+/// size), and only for non-overlapping ranges. 1 MiB chunks stayed under it
+/// and made far copies of 32 MiB or more 14-41% slower; 64 MiB chunks keep
+/// the non-temporal path wherever the threshold is at most 64 MiB. Fills
+/// measured neutral at 1 MiB, and overlapping copies never take that path.
+const BULK_COPY_FAR_CHUNK: usize = if cfg!(target_arch = "x86_64") {
+    64 << 20
+} else {
+    BULK_CHUNK
+};
 
 /// ix fork: the chunked `memory.copy`.
 ///
@@ -438,16 +458,23 @@ const BULK_CHUNK: usize = 1 << 20;
 #[inline(never)]
 unsafe fn memory_copy_chunked(store: &mut dyn VMStore, dst: *mut u8, src: *mut u8, len: usize) {
     let src = src.cast_const();
+    if !bulk_preemptible(store) {
+        // SAFETY: as this function.
+        return unsafe { src.copy_to(dst, len) };
+    }
     // `dst - src` (wrapping) in `1..len` means dst is inside the source range.
     let d = (dst as usize).wrapping_sub(src as usize);
     let backward = d != 0 && d < len;
+    // Likewise `src - dst` in `0..len`: src is inside the destination range.
+    let overlap = backward || (src as usize).wrapping_sub(dst as usize) < len;
+    let chunk = if overlap { BULK_CHUNK } else { BULK_COPY_FAR_CHUNK };
     let mut done = 0;
     while done < len {
         if done != 0 {
             // SAFETY: entered from wasm; nothing with a destructor is live.
             unsafe { bulk_preempt(store) };
         }
-        let n = BULK_CHUNK.min(len - done);
+        let n = chunk.min(len - done);
         let off = if backward { len - done - n } else { done };
         // SAFETY: `off + n <= len`, inside both checked ranges.
         unsafe { src.add(off).copy_to(dst.add(off), n) };
@@ -463,6 +490,10 @@ unsafe fn memory_copy_chunked(store: &mut dyn VMStore, dst: *mut u8, src: *mut u
 #[cold]
 #[inline(never)]
 unsafe fn memory_fill_chunked(store: &mut dyn VMStore, dst: *mut u8, val: u8, len: usize) {
+    if !bulk_preemptible(store) {
+        // SAFETY: as this function.
+        return unsafe { dst.write_bytes(val, len) };
+    }
     let mut done = 0;
     while done < len {
         if done != 0 {
@@ -474,6 +505,20 @@ unsafe fn memory_fill_chunked(store: &mut dyn VMStore, dst: *mut u8, val: u8, le
         unsafe { dst.add(done).write_bytes(val, n) };
         done += n;
     }
+}
+
+/// ix fork: whether a chunked op can be preempted at all: poll or epoch
+/// interruption is on, and the code is native. Under Pulley an unwind from
+/// here returns to the interpreter, which does not expect one from this
+/// libcall. When this is false the op is one memmove/memset, as upstream.
+fn bulk_preemptible(store: &mut dyn VMStore) -> bool {
+    let opaque: &mut StoreOpaque = store;
+    let engine = opaque.engine();
+    if engine.is_pulley() {
+        return false;
+    }
+    let epoch = cfg!(target_has_atomic = "64") && engine.tunables().epoch_interruption;
+    epoch || opaque.poll_ptr().is_some()
 }
 
 /// ix fork: the preemption check between chunks of a bulk op. Raises
@@ -489,8 +534,7 @@ unsafe fn memory_fill_chunked(store: &mut dyn VMStore, dst: *mut u8, val: u8, le
 ///   installed the op runs to the end as upstream and the compiled code's
 ///   next epoch check calls it.
 ///
-/// Pulley is skipped: its unwind returns to the interpreter, which does not
-/// expect one from this libcall.
+/// Only called when `bulk_preemptible` holds.
 ///
 /// # Safety
 ///
@@ -500,9 +544,6 @@ unsafe fn memory_fill_chunked(store: &mut dyn VMStore, dst: *mut u8, val: u8, le
 unsafe fn bulk_preempt(store: &mut dyn VMStore) {
     let interrupt = {
         let opaque: &mut StoreOpaque = store;
-        if opaque.engine().is_pulley() {
-            return;
-        }
         let poll = opaque.poll_interrupt_pending();
         #[cfg(target_has_atomic = "64")]
         let poll = poll || {

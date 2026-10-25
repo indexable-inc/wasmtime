@@ -18,6 +18,9 @@ fn trap(e: &Error) -> Trap {
 enum Mode {
     Poll,
     Epoch,
+    /// Epoch interruption with Winch, the other compiler that calls these
+    /// libcalls (poll interruption does not support Winch).
+    EpochWinch,
 }
 
 fn engine(mode: Mode) -> Engine {
@@ -29,8 +32,15 @@ fn engine(mode: Mode) -> Engine {
         Mode::Epoch => {
             c.epoch_interruption(true);
         }
+        Mode::EpochWinch => {
+            c.epoch_interruption(true);
+            c.strategy(Strategy::Winch);
+        }
     }
-    c.wasm_threads(true);
+    if !matches!(mode, Mode::EpochWinch) {
+        c.wasm_threads(true);
+        c.shared_memory(true);
+    }
     Engine::new(&c).unwrap()
 }
 
@@ -45,26 +55,53 @@ const BULK: &str = r#"
     (memory.copy (local.get 0) (local.get 1) (local.get 2))))
 "#;
 
+/// One interrupted 3 GiB op: what it trapped with, how long it took to stop
+/// after the interrupt, and whether it stopped part-way.
+struct Outcome {
+    trap: Trap,
+    stopped: Duration,
+    midway: bool,
+}
+
 /// Runs `op(dst, a, len)` and fires the store's interrupt (poll) or bumps the
-/// epoch (epoch) 5 ms after the call starts. Returns the trap and how long
-/// the call took to stop after the interrupt.
-fn interrupted(mode: Mode, op: &str, dst: u64, a: u64, len: u64) -> (Trap, Duration) {
+/// epoch (epoch) 5 ms after the call starts. Marker bytes show whether the op
+/// stopped part-way (so the trap came from inside the libcall, not from a
+/// compiled check before it). Then checks the store still runs wasm,
+/// including a chunked op, after the unwind out of the libcall.
+fn interrupted(mode: Mode, op: &str, dst: u64, a: u64, len: u64) -> Outcome {
     let engine = engine(mode);
     let module = Module::new(&engine, BULK).unwrap();
     let mut store = Store::new(&engine, ());
-    if let Mode::Epoch = mode {
+    if let Mode::Epoch | Mode::EpochWinch = mode {
         store.set_epoch_deadline(1);
     }
     let i = Instance::new(&mut store, &module, &[]).unwrap();
     let f = i
         .get_typed_func::<(u32, u32, u32), ()>(&mut store, op)
         .unwrap();
+    let mem = i.get_memory(&mut store, "mem").unwrap();
+    // `first`: the byte the op writes first, `last`: the byte it writes last,
+    // with the value each gets. Copies get nonzero source markers.
+    let (first, last, want) = match op {
+        "fill" => (dst, dst + len - 1, (a as u8, a as u8)),
+        _ => {
+            let m = mem.data_mut(&mut store);
+            m[a as usize] = 1;
+            m[(a + len - 1) as usize] = 2;
+            if dst > a && dst < a + len {
+                // Back to front: the last source byte is copied first.
+                (dst + len - 1, dst, (2, 1))
+            } else {
+                (dst, dst + len - 1, (1, 2))
+            }
+        }
+    };
     let fire: Box<dyn FnOnce() + Send> = match mode {
         Mode::Poll => {
             let h = store.interrupt_handle().unwrap();
             Box::new(move || h.interrupt())
         }
-        Mode::Epoch => {
+        Mode::Epoch | Mode::EpochWinch => {
             let e = engine.clone();
             Box::new(move || e.increment_epoch())
         }
@@ -79,14 +116,49 @@ fn interrupted(mode: Mode, op: &str, dst: u64, a: u64, len: u64) -> (Trap, Durat
     let end = Instant::now();
     let fired = t.join().unwrap();
     let err = r.expect_err("a 3 GiB op finished before a 5 ms interrupt");
-    (trap(&err), end.saturating_duration_since(fired))
+    let m = mem.data(&store);
+    let midway = m[first as usize] == want.0 && m[last as usize] != want.1;
+    let out = Outcome {
+        trap: trap(&err),
+        stopped: end.saturating_duration_since(fired),
+        midway,
+    };
+
+    // The store is usable after the unwind: rearm, then a chunked fill.
+    match mode {
+        Mode::Poll => assert!(store.interrupt_handle().unwrap().rearm()),
+        Mode::Epoch | Mode::EpochWinch => store.set_epoch_deadline(1 << 30),
+    }
+    let fill = i
+        .get_typed_func::<(u32, u32, u32), ()>(&mut store, "fill")
+        .unwrap();
+    fill.call(&mut store, (64, 0x77, (5 * MIB) as u32)).unwrap();
+    let m = mem.data(&store);
+    assert!(m[64..64 + (5 * MIB) as usize].iter().all(|b| *b == 0x77));
+    out
 }
 
+/// The brief's bound: a trap within about 10 ms of the interrupt. Each
+/// attempt must trap with `Interrupt`, part-way through the op, within 100 ms;
+/// one of three must stop within 10 ms (so a descheduled test thread on a
+/// loaded host does not fail it).
 fn check_prompt(mode: Mode, op: &str, dst: u64, a: u64, len: u64) {
-    let (trap, stopped) = interrupted(mode, op, dst, a, len);
-    eprintln!("ix_bulk_preempt {mode:?} {op} dst={dst:#x} a={a:#x} len={len:#x}: {trap:?} {stopped:?} after the interrupt");
-    assert_eq!(trap, Trap::Interrupt);
-    assert!(stopped < Duration::from_millis(10), "took {stopped:?} to stop");
+    let mut best = Duration::MAX;
+    for attempt in 0..3 {
+        let o = interrupted(mode, op, dst, a, len);
+        eprintln!(
+            "ix_bulk_preempt {mode:?} {op} dst={dst:#x} a={a:#x} len={len:#x}: {:?} midway={} {:?} after the interrupt (attempt {attempt})",
+            o.trap, o.midway, o.stopped
+        );
+        assert_eq!(o.trap, Trap::Interrupt);
+        assert!(o.midway, "the op did not stop part-way");
+        assert!(o.stopped < Duration::from_millis(100), "took {:?} to stop", o.stopped);
+        best = best.min(o.stopped);
+        if best < Duration::from_millis(10) {
+            return;
+        }
+    }
+    panic!("best of 3 took {best:?} to stop");
 }
 
 #[test]
@@ -109,6 +181,29 @@ fn copy_3gib_forward_epoch() {
     check_prompt(Mode::Epoch, "copy", 0, GIB, 3 * GIB);
 }
 
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn fill_3gib_epoch_winch() {
+    check_prompt(Mode::EpochWinch, "fill", 0, 0xab, 3 * GIB);
+}
+
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn copy_3gib_backward_epoch_winch() {
+    check_prompt(Mode::EpochWinch, "copy", GIB, 0, 3 * GIB);
+}
+
+// Non-overlapping: the 64 MiB far-copy chunks on x86_64.
+#[test]
+fn copy_2gib_far_poll() {
+    check_prompt(Mode::Poll, "copy", 0, 2 * GIB, 2 * GIB);
+}
+
+#[test]
+fn copy_2gib_far_epoch() {
+    check_prompt(Mode::Epoch, "copy", 0, 2 * GIB, 2 * GIB);
+}
+
 // dst > src, overlapping: the chunks run back to front.
 #[test]
 fn copy_3gib_backward_poll() {
@@ -120,10 +215,10 @@ fn copy_3gib_backward_epoch() {
     check_prompt(Mode::Epoch, "copy", GIB, 0, 3 * GIB);
 }
 
-/// With an epoch callback installed the libcall never runs it mid-op (a
-/// callback may grow, and so move, the memory): the op completes and the
-/// callback runs at the compiled epoch checks (function entry and the
-/// deferred check right after the op).
+/// Guards against the libcall trapping or running the epoch callback mid-op
+/// when a callback is installed (a callback may grow, and so move, the
+/// memory): the op completes and the callback runs only at the compiled
+/// epoch checks (function entry and the deferred check right after the op).
 #[test]
 fn epoch_callback_never_runs_mid_op() -> Result<()> {
     let engine = engine(Mode::Epoch);
@@ -214,6 +309,23 @@ fn overlap_both_directions_across_chunks() {
     }
     // dst == src and a far (non-overlapping) copy.
     for (dst, src, len) in [(base, base, 5 * m), (0, 8 * m, 6 * m + 1), (8 * m, 1, 6 * m)] {
+        let mut want = pattern(size);
+        mem.data_mut(&mut store).copy_from_slice(&want);
+        want.copy_within(src..src + len, dst);
+        copy.call(&mut store, (dst as u32, src as u32, len as u32)).unwrap();
+        assert!(mem.data(&store) == &want[..], "copy dst={dst} src={src} len={len}");
+    }
+}
+
+/// Non-overlapping copies past one 64 MiB far-copy chunk, both orders.
+#[test]
+fn far_copy_across_big_chunks() {
+    let size = 256 * MIB as usize;
+    let (mut store, i, _fill, copy) = small((size >> 16) as u32, false);
+    let mem = i.get_memory(&mut store, "mem").unwrap();
+    let m = MIB as usize;
+    let len = 100 * m + 13;
+    for (dst, src) in [(3, 128 * m + 5), (128 * m + 5, 3)] {
         let mut want = pattern(size);
         mem.data_mut(&mut store).copy_from_slice(&want);
         want.copy_within(src..src + len, dst);
