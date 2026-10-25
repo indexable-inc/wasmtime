@@ -262,6 +262,8 @@ fn ix_indirect_rows_truncated() {
         let module = Module::new(&engine, &wat).unwrap();
         assert_eq!(module.ix_dispatch_rows(), if on { 2 } else { 0 });
         assert_eq!(module.ix_dispatch_entries(), if on { 6 + 4 } else { 0 });
+        let bytes = module.ix_dispatch_bytes();
+        assert!(bytes >= module.ix_dispatch_entries() * 8 && (bytes == 0) == !on);
         let linker = Linker::new(&engine);
         let mut i = instantiate(&engine, &module, &linker);
         check_semantics(&mut i);

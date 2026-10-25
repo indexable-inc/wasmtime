@@ -219,6 +219,23 @@ impl Module {
         self.inner.module.module().ix_dispatch.entries as usize
     }
 
+    /// ix fork: the bytes of memory this module's `call_indirect` dispatch
+    /// array occupies, rounded up to whole host pages where it is its own
+    /// mapping; 0 when it has none. Allocated once per module at load and
+    /// shared by every instance, so an embedder can charge it to whoever
+    /// loaded the module.
+    pub fn ix_dispatch_bytes(&self) -> usize {
+        let Some(m) = self.inner.ix_dispatch.as_ref() else {
+            return 0;
+        };
+        #[cfg(has_virtual_memory)]
+        if m.supports_virtual_memory() {
+            let page = crate::runtime::vm::host_page_size();
+            return m.len().next_multiple_of(page);
+        }
+        m.len()
+    }
+
     /// Creates a new WebAssembly `Module` from the given in-memory `bytes`.
     ///
     /// The `bytes` provided must be in one of the following formats:
@@ -573,11 +590,16 @@ impl Module {
     pub(crate) fn from_parts_raw(
         engine: &Engine,
         code: Arc<EngineCode>,
-        info: CompiledModuleInfo,
+        mut info: CompiledModuleInfo,
         index: Arc<CompiledFunctionsTable>,
         serializable: bool,
     ) -> Result<Self> {
         let checksum = info.checksum;
+        // ix fork: the dispatch plan's table images are only read to build
+        // the dispatch array below; take them out so the loaded module does
+        // not keep a second copy of every static table. (Serializing a
+        // module copies its original artifact bytes, which keep them.)
+        let ix_images = core::mem::take(&mut info.module.ix_dispatch.images);
         let module = CompiledModule::from_artifacts(code.clone(), info, index, engine.profiler())?;
 
         // Validate the module can be used with the current instance allocator.
@@ -587,7 +609,8 @@ impl Module {
             .validate_module(module.module(), &offsets)?;
 
         let _ = serializable;
-        let ix_dispatch = ix_build_dispatch(engine, &code, &module)?;
+        let ix_dispatch = ix_build_dispatch(engine, &code, &module, &ix_images)?;
+        drop(ix_images);
 
         Ok(Self {
             inner: try_new::<Arc<_>>(ModuleInner {
@@ -1376,6 +1399,7 @@ fn ix_build_dispatch(
     engine: &Engine,
     code: &EngineCode,
     module: &CompiledModule,
+    images: &[alloc::vec::Vec<u32>],
 ) -> Result<Option<MmapVec>> {
     use wasmtime_environ::DefinedFuncIndex;
     let env = module.module();
@@ -1412,13 +1436,16 @@ fn ix_build_dispatch(
         // above), and every bit pattern is a valid `usize`.
         let slots: &mut [usize] =
             unsafe { core::slice::from_raw_parts_mut(raw.as_mut_ptr().cast(), entries) };
+        // Rows must occupy disjoint ranges in row order, as the planner lays
+        // them out: code compiled for one row must never read another
+        // row's entries (a deserialized artifact is checked, not trusted).
+        let mut next_free = 0usize;
         for row in plan.rows.iter() {
             let want = code
                 .signatures()
                 .shared_type(row.ty)
                 .context("ix dispatch row type not registered")?;
-            let image = plan
-                .images
+            let image = images
                 .get(usize::try_from(row.image)?)
                 .context("ix dispatch row image out of range")?;
             let len = usize::try_from(row.len)?;
@@ -1429,6 +1456,8 @@ fn ix_build_dispatch(
                 .and_then(|n| start.checked_add(n))
                 .and_then(|end| slots.get_mut(start..end))
                 .context("ix dispatch row out of range")?;
+            ensure!(start >= next_free, "ix dispatch rows overlap");
+            next_free = start + len + 1;
             for (slot, &d) in dst.iter_mut().zip(image.iter()) {
                 if d == u32::MAX {
                     continue;

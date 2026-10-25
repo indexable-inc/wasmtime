@@ -1448,6 +1448,20 @@ impl Func {
     }
 }
 
+/// ix fork: an upper bound on the stack used between the re-entry check in
+/// [`invoke_wasm_and_catch_traps`] and the first instruction of the wasm
+/// callee: the rest of this function's frame, `catch_traps` and its
+/// `CallThreadState`, the closure, `VMFuncRef::array_call` and the
+/// array-to-wasm trampoline (up to the SP it stores as
+/// `last_wasm_entry_sp`). Measured on x86_64 (2026-10-25, a re-entry from a
+/// host import in `ix_slack_reentry_through_imports_is_bounded`): 1144 bytes
+/// in a debug build, 256 in release. 8 KiB is several times the debug
+/// figure, so other targets and compiler versions have room; the cost is
+/// only that a host re-entry within 8 KiB of the limit traps instead of
+/// running.
+#[cfg(has_host_compiler_backend)]
+const IX_REENTRY_SLACK: usize = 8 * 1024;
+
 /// Prepares for entrance into WebAssembly.
 ///
 /// This function will set up context such that `closure` is allowed to call a
@@ -1473,6 +1487,14 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
     // cannot re-enter wasm: v50's epoch and call-hook callbacks get no
     // `AsContextMut`.) Async stores get a fresh stack and limit per call, so
     // this is only for synchronous ones.
+    //
+    // The stack pointer read here is not the one wasm starts at: this
+    // function's remaining frame, `catch_traps` (its `CallThreadState`), the
+    // closure, `VMFuncRef::array_call` and the array-to-wasm trampoline all
+    // sit between, so the callee's entry SP is lower by their frames. A leaf
+    // is sound only when entered at or above the limit, so refuse unless
+    // there are `IX_REENTRY_SLACK` bytes above it, an upper bound on those
+    // frames.
     #[cfg(has_host_compiler_backend)]
     if store.engine().get_ix_leaf_stack_slack() > 0 && !store.0.can_block() {
         use wasmtime_environ::TripleExt;
@@ -1480,7 +1502,7 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
         let limit = unsafe { *store.0.vm_store_context().stack_limit.get() };
         if !store.engine().target().is_pulley()
             && limit != usize::MAX
-            && crate::runtime::vm::get_stack_pointer() < limit
+            && crate::runtime::vm::get_stack_pointer() < limit.saturating_add(IX_REENTRY_SLACK)
         {
             return Err(crate::Trap::StackOverflow.into());
         }
