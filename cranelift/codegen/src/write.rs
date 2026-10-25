@@ -99,6 +99,14 @@ pub trait FuncWriter {
         if let Some(limit) = func.stack_limit {
             any = true;
             self.write_entity_definition(w, func, AnyEntity::StackLimit, &limit)?;
+            if func.stack_limit_leaf_slack > 0 {
+                // A comment, so the text still parses (ix fork).
+                writeln!(
+                    w,
+                    "    ; stack_limit_leaf_slack = {}",
+                    func.stack_limit_leaf_slack
+                )?;
+            }
         }
 
         Ok(any)

@@ -242,9 +242,14 @@ pub fn cont_new(
     let stack_pointer = contref.stack.control_context_stack_pointer();
     // Same caveat regarding stack_limit here as described in
     // `wasmtime::runtime::func::EntryStoreContext::enter_wasm`.
+    //
+    // ix fork: both terms keep `ix_leaf_stack_slack` bytes above the floor
+    // for unchecked leaf frames, including the continuation stack's own
+    // bottom, so a leaf never runs into whatever lies below that stack.
+    let slack = usize::try_from(store.engine().get_ix_leaf_stack_slack()).unwrap();
     let wasm_stack_limit = core::cmp::max(
-        stack_pointer - store.engine().config().max_wasm_stack,
-        tsp as usize - stack_size,
+        stack_pointer - store.engine().wasm_stack_limit_distance(),
+        tsp as usize - stack_size + slack,
     );
     let limits = VMStackLimits::with_stack_limit(wasm_stack_limit);
     let csi = &mut contref.common_stack_information;

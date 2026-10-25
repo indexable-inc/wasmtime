@@ -121,6 +121,15 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
         cfg.cranelift_wasmtime_debug_checks(true);
     }
 
+    // ix fork: run the whole suite with the check trims on
+    // (`WASMTIME_TEST_IX_CHECK_TRIM=1`): leaf stack slack, static-table
+    // devirtualisation, and eager table init.
+    if is_cranelift && std::env::var("WASMTIME_TEST_IX_CHECK_TRIM").is_ok() {
+        cfg.ix_leaf_stack_slack(4096);
+        cfg.ix_table_devirt(true);
+        cfg.table_lazy_init(false);
+    }
+
     // By default we'll allocate huge chunks (6gb) of the address space for each
     // linear memory. This is typically fine but when we emulate tests with QEMU
     // it turns out that it causes memory usage to balloon massively. Leave a

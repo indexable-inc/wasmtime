@@ -934,6 +934,67 @@ impl Config {
         self
     }
 
+    /// ix fork: hold `bytes` of the [`Config::max_wasm_stack`] budget back as
+    /// slack below the stack limit, and let functions that need no stack
+    /// check run without one.
+    ///
+    /// Wasmtime normally sets the stack limit `max_wasm_stack` bytes below
+    /// the stack pointer at entry to wasm, and every function that makes a
+    /// call or has a frame compares the stack pointer against that limit in
+    /// its prologue. With this option the limit sits `max_wasm_stack - bytes`
+    /// below the entry stack pointer instead, and a function skips its check
+    /// when both hold:
+    ///
+    /// * it makes no wasm-level call (`call`, `call_indirect`, `call_ref`,
+    ///   any `return_call*`, imports included). Calls Wasmtime inserts to its
+    ///   own runtime builtins and libcalls (the epoch slow path,
+    ///   `memory.grow`, traps) are allowed: they run on the host's stack
+    ///   headroom and never consult the limit;
+    /// * its whole native frame is at most `bytes`.
+    ///
+    /// Such a function is entered with the stack pointer at or above the
+    /// limit (its caller's check covered it), so it never goes below
+    /// `entry - max_wasm_stack`: the same floor as with the option off, so
+    /// every guarantee Wasmtime gives about host stack headroom still holds.
+    /// The cost is that checked code may use `bytes` less stack before it
+    /// traps.
+    ///
+    /// The value is part of the compiled artifact's compatibility check: code
+    /// compiled with one value never loads into an engine using another.
+    ///
+    /// # Errors
+    ///
+    /// [`Engine::new`] fails if `bytes` is more than a quarter of
+    /// `max_wasm_stack` or more than 64 KiB.
+    ///
+    /// By default this is 0 (off).
+    pub fn ix_leaf_stack_slack(&mut self, bytes: u32) -> &mut Self {
+        self.tunables.ix_leaf_stack_slack = Some(bytes);
+        self
+    }
+
+    /// ix fork: devirtualise `call_indirect` through tables the module can
+    /// never change.
+    ///
+    /// A table qualifies when it is defined by the module (not imported), not
+    /// exported, its initial contents come only from active element segments
+    /// of constant functions or nulls at constant, in-bounds offsets, and no
+    /// function in the module executes `table.set`, `table.grow`,
+    /// `table.fill`, `table.copy` or `table.init` on it. These are facts the
+    /// compiler reads from the module itself; nothing the guest claims is
+    /// trusted. Through such a table:
+    ///
+    /// * a `call_indirect` whose index is a constant naming a function of the
+    ///   call's type becomes a direct call;
+    /// * when every non-null element has the call's type, the signature
+    ///   check is dropped (the bounds and null checks stay).
+    ///
+    /// By default this is off.
+    pub fn ix_table_devirt(&mut self, enable: bool) -> &mut Self {
+        self.tunables.ix_table_devirt = Some(enable);
+        self
+    }
+
     /// Configures the size of the stacks used for asynchronous execution.
     ///
     /// This setting configures the size of the stacks that are allocated for
@@ -2778,6 +2839,15 @@ impl Config {
         }
         if self.max_wasm_stack == 0 {
             bail!("max_wasm_stack size cannot be zero");
+        }
+        if let Some(slack) = self.tunables.ix_leaf_stack_slack {
+            let slack = usize::try_from(slack)?;
+            if slack > 64 * 1024 {
+                bail!("ix_leaf_stack_slack cannot exceed 64 KiB");
+            }
+            if slack.saturating_mul(4) > self.max_wasm_stack {
+                bail!("ix_leaf_stack_slack cannot exceed a quarter of max_wasm_stack");
+            }
         }
         if !cfg!(feature = "wmemcheck") && self.wmemcheck {
             bail!("wmemcheck (memory checker) was requested but is not enabled in this build");
@@ -5043,6 +5113,26 @@ impl Engine {
     /// Returns the configured [`Config::guard_before_linear_memory`] value.
     pub fn get_guard_before_linear_memory(&self) -> bool {
         self.tunables().guard_before_linear_memory
+    }
+
+    /// Returns the configured [`Config::ix_leaf_stack_slack`] value.
+    pub fn get_ix_leaf_stack_slack(&self) -> u32 {
+        self.tunables().ix_leaf_stack_slack
+    }
+
+    /// Returns the configured [`Config::ix_table_devirt`] value.
+    pub fn get_ix_table_devirt(&self) -> bool {
+        self.tunables().ix_table_devirt
+    }
+
+    /// The distance from the stack pointer at entry to wasm down to the stack
+    /// limit: `max_wasm_stack` minus the ix leaf slack held in reserve below
+    /// the limit (see [`Config::ix_leaf_stack_slack`]).
+    pub(crate) fn wasm_stack_limit_distance(&self) -> usize {
+        let slack = usize::try_from(self.tunables().ix_leaf_stack_slack).unwrap();
+        // `Config::validate` keeps the slack at most a quarter of the budget.
+        debug_assert!(slack.saturating_mul(4) <= self.config().max_wasm_stack);
+        self.config().max_wasm_stack - slack
     }
 
     /// Returns the configured [`Config::table_lazy_init`] value.

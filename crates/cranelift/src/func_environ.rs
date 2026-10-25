@@ -247,6 +247,13 @@ pub struct FuncEnvironment<'module_environment> {
     /// into the host to trap when signal handlers are disabled.
     pub(crate) stack_limit_at_function_entry: Option<VmctxLoadChain>,
 
+    /// ix fork: set when this function makes any wasm-level call (every
+    /// `call`, `call_indirect`, `call_ref` and `return_call*` goes through
+    /// [`Call`], and stack switching sets it too). A function that never sets
+    /// it calls only runtime builtins and libcalls, so it may skip its stack
+    /// check under `Tunables::ix_leaf_stack_slack`.
+    pub(crate) ix_made_wasm_call: bool,
+
     /// Function-local support for translating stack-switching operations.
     stack_switching: StackSwitchingSupport,
 
@@ -328,6 +335,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             translation,
 
             stack_limit_at_function_entry: None,
+            ix_made_wasm_call: false,
 
             stack_switching: StackSwitchingSupport::default(),
 
@@ -1809,6 +1817,54 @@ impl FuncEnvironment<'_> {
         }
     }
 
+    /// ix fork: the fixed contents of `table`, if the module itself can
+    /// never change them (`Tunables::ix_table_devirt`; see
+    /// `wasmtime_environ::IxStaticTable`).
+    fn ix_static_table(&self, table: TableIndex) -> Option<&wasmtime_environ::IxStaticTable> {
+        if !self.tunables.ix_table_devirt {
+            return None;
+        }
+        let def = self.module.defined_table_index(table)?;
+        self.translation.ix_static_tables.get(def.index())?.as_ref()
+    }
+
+    /// ix fork: the function a `call_indirect` through `table` at `callee`
+    /// always reaches, when the table is static, `callee` is a constant, and
+    /// the element there is a function of exactly the call's type. Such a
+    /// call can never trap on bounds, null or signature, so a direct call to
+    /// that function is the same program. Anything else returns `None` and
+    /// keeps every runtime check.
+    fn ix_devirt_target(
+        &self,
+        func: &ir::Function,
+        table: TableIndex,
+        ty_index: TypeIndex,
+        callee: ir::Value,
+    ) -> Option<FuncIndex> {
+        let image = self.ix_static_table(table)?;
+        let ir::ValueDef::Result(inst, 0) = func.dfg.value_def(callee) else {
+            return None;
+        };
+        let ir::InstructionData::UnaryImm {
+            opcode: ir::Opcode::Iconst,
+            imm,
+        } = func.dfg.insts[inst]
+        else {
+            return None;
+        };
+        let bits = func.dfg.value_type(callee).bits();
+        let raw = imm.bits().cast_unsigned() & (u64::MAX >> (64 - bits));
+        let f = *image.funcs.get(usize::try_from(raw).ok()?)?;
+        if f.is_reserved_value() || self.module.ix_intrinsic(f).is_some() {
+            return None;
+        }
+        let want = self.module.types[ty_index].unwrap_module_type_index();
+        let have = self.module.functions[f]
+            .signature
+            .unwrap_module_type_index();
+        (have == want).then_some(f)
+    }
+
     fn make_table(&mut self, func: &mut ir::Function, index: TableIndex) -> TableData {
         let table = self.module.tables[index];
         let element_size = if table.ref_type.is_vmgcref_type() {
@@ -1838,7 +1894,11 @@ impl FuncEnvironment<'_> {
 
         // A fixed-size table can't be resized, so its base address won't change
         // and its base load is `readonly` and `can_move`.
-        let is_static = Some(table.limits.min) == table.limits.max;
+        //
+        // ix fork: a static table (never grown, not imported or exported) is
+        // fixed at its minimum size whatever its declared maximum.
+        let is_static =
+            Some(table.limits.min) == table.limits.max || self.ix_static_table(index).is_some();
 
         if let Some(def_index) = self.module.defined_table_index(index) {
             // A defined table's `VMTableDefinition` is inlined into the vmctx,
@@ -1991,6 +2051,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         env: &'a mut FuncEnvironment<'module_env>,
         srcloc: ir::SourceLoc,
     ) -> Self {
+        env.ix_made_wasm_call = true;
         Call {
             builder,
             env,
@@ -2005,6 +2066,7 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         env: &'a mut FuncEnvironment<'module_env>,
         srcloc: ir::SourceLoc,
     ) -> Self {
+        env.ix_made_wasm_call = true;
         Call {
             builder,
             env,
@@ -2272,6 +2334,17 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         callee: ir::Value,
         call_args: &[ir::Value],
     ) -> WasmResult<Option<CallRets>> {
+        // ix fork: a constant index into a static table names its callee.
+        if let Some(f) = self
+            .env
+            .ix_devirt_target(self.builder.func, table_index, ty_index, callee)
+        {
+            log::debug!(target: "ix_check_trim", "devirt call_indirect -> func {}", f.as_u32());
+            return Ok(match self.direct_call(f, sig_ref, call_args)? {
+                Reachability::Reachable(rets) => Some(rets),
+                Reachability::Unreachable => None,
+            });
+        }
         let (code_ptr, callee_vmctx) = match self.check_and_load_code_and_callee_vmctx(
             table_index,
             ty_index,
@@ -2346,7 +2419,22 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             // Functions do not have a statically known type in the table, a
             // typecheck is required. Fall through to below to perform the
             // actual typecheck.
-            WasmHeapType::Func => {}
+            //
+            // ix fork: unless the table is static and every non-null element
+            // has exactly the call's type. Then the runtime check could only
+            // ever pass (or the funcref is null, which the faulting load of
+            // the code pointer still traps on), so it is dropped.
+            WasmHeapType::Func => {
+                let want = self.env.module.types[ty_index].unwrap_module_type_index();
+                if self
+                    .env
+                    .ix_static_table(table_index)
+                    .is_some_and(|t| t.uniform == Some(want))
+                {
+                    log::debug!(target: "ix_check_trim", "sigcheck dropped (uniform static table)");
+                    return CheckIndirectCallTypeSignature::StaticMatch { may_be_null: true };
+                }
+            }
 
             // Functions that have a statically known type are either going to
             // always succeed or always fail. Figure out by inspecting the types
@@ -5496,6 +5584,8 @@ impl FuncEnvironment<'_> {
         resume_args: &[ir::Value],
         resumetable: &[(u32, Option<ir::Block>)],
     ) -> WasmResult<Vec<ir::Value>> {
+        // Switching stacks runs wasm elsewhere: never a leaf (ix fork).
+        self.ix_made_wasm_call = true;
         stack_switching::instructions::translate_resume(
             self,
             builder,
@@ -5514,6 +5604,8 @@ impl FuncEnvironment<'_> {
         contobj: ir::Value,
         resumetable: &[(u32, Option<ir::Block>)],
     ) -> WasmResult<Vec<ir::Value>> {
+        // Switching stacks runs wasm elsewhere: never a leaf (ix fork).
+        self.ix_made_wasm_call = true;
         stack_switching::instructions::translate_resume_throw_ref(
             self,
             builder,
@@ -5533,6 +5625,8 @@ impl FuncEnvironment<'_> {
         contobj: ir::Value,
         resumetable: &[(u32, Option<ir::Block>)],
     ) -> WasmResult<Vec<ir::Value>> {
+        // Switching stacks runs wasm elsewhere: never a leaf (ix fork).
+        self.ix_made_wasm_call = true;
         stack_switching::instructions::translate_resume_throw(
             self,
             builder,
@@ -5552,6 +5646,8 @@ impl FuncEnvironment<'_> {
         suspend_arg_types: &[WasmValType],
         tag_return_types: &[WasmValType],
     ) -> WasmResult<Vec<ir::Value>> {
+        // Switching stacks runs wasm elsewhere: never a leaf (ix fork).
+        self.ix_made_wasm_call = true;
         stack_switching::instructions::translate_suspend(
             self,
             builder,
@@ -5572,6 +5668,8 @@ impl FuncEnvironment<'_> {
         switch_arg_types: &[WasmValType],
         return_types: &[WasmValType],
     ) -> WasmResult<Vec<ir::Value>> {
+        // Switching stacks runs wasm elsewhere: never a leaf (ix fork).
+        self.ix_made_wasm_call = true;
         stack_switching::instructions::translate_switch(
             self,
             builder,

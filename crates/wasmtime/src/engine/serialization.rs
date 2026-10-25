@@ -370,6 +370,8 @@ impl Metadata<'_> {
             concurrency_support,
             recording,
             asan_stack_switching,
+            ix_leaf_stack_slack,
+            ix_table_devirt,
 
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
@@ -447,6 +449,14 @@ impl Metadata<'_> {
             "guard before linear memory",
         )?;
         Self::check_bool(table_lazy_init, other.table_lazy_init, "table lazy init")?;
+        // Code compiled with leaf slack relies on the runtime holding that
+        // many bytes back below the stack limit, so both must agree exactly.
+        Self::check_int(
+            ix_leaf_stack_slack,
+            other.ix_leaf_stack_slack,
+            "ix leaf stack slack",
+        )?;
+        Self::check_bool(ix_table_devirt, other.ix_table_devirt, "ix table devirt")?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,

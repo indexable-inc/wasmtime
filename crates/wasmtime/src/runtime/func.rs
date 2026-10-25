@@ -1464,6 +1464,28 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
     // `stack_chain` to a new `InitialStack`, pointing to the
     // stack-allocated `initial_stack_csi`.
     let mut initial_stack_csi = VMCommonStackInformation::running_default();
+
+    // ix fork: with `ix_leaf_stack_slack`, a leaf runs without a stack check,
+    // so a host import that calls back into wasm below the limit could enter
+    // a leaf where stock Wasmtime would trap in the callee's prologue. Refuse
+    // such a re-entry here, before any wasm runs: the outcome is the same
+    // `StackOverflow` a checked callee gives. (Builtins called from a leaf
+    // cannot re-enter wasm: v50's epoch and call-hook callbacks get no
+    // `AsContextMut`.) Async stores get a fresh stack and limit per call, so
+    // this is only for synchronous ones.
+    #[cfg(has_host_compiler_backend)]
+    if store.engine().get_ix_leaf_stack_slack() > 0 && !store.0.can_block() {
+        use wasmtime_environ::TripleExt;
+        // SAFETY: reading the store's own stack-limit cell.
+        let limit = unsafe { *store.0.vm_store_context().stack_limit.get() };
+        if !store.engine().target().is_pulley()
+            && limit != usize::MAX
+            && crate::runtime::vm::get_stack_pointer() < limit
+        {
+            return Err(crate::Trap::StackOverflow.into());
+        }
+    }
+
     // Stores some state of the runtime just before entering Wasm. Will be
     // restored upon exiting Wasm. Note that the `CallThreadState` that is
     // created by the `catch_traps` call below will store a pointer to this
@@ -1575,8 +1597,12 @@ impl EntryStoreContext {
             // Also note that `saturating_sub` is used here since if the user
             // said that the function gets nigh-infinite stack well then by
             // golly it'll get nigh-infinite stack in which case the limit is 0.
+            //
+            // ix fork: the limit sits `ix_leaf_stack_slack` bytes above the
+            // `max_wasm_stack` floor, so unchecked leaf frames (at most that
+            // many bytes below the limit) still end above the floor.
             let wasm_stack_limit =
-                stack_pointer.saturating_sub(store.engine().config().max_wasm_stack);
+                stack_pointer.saturating_sub(store.engine().wasm_stack_limit_distance());
             let prev_stack = unsafe {
                 mem::replace(
                     &mut *store.0.vm_store_context().stack_limit.get(),

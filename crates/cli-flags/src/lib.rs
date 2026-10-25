@@ -100,6 +100,15 @@ wasmtime_option_group! {
         /// them during instantiation. (default: yes)
         pub table_lazy_init: Option<bool>,
 
+        /// ix fork: bytes of `max-wasm-stack` held back below the stack limit
+        /// so that functions with no wasm-level calls and a frame of at most
+        /// this many bytes skip their prologue stack check. (default: 0, off)
+        pub ix_leaf_stack_slack: Option<u32>,
+
+        /// ix fork: devirtualise `call_indirect` through tables the module
+        /// can never change. (default: no)
+        pub ix_table_devirt: Option<bool>,
+
         /// Enable the pooling allocator, in place of the on-demand allocator.
         pub pooling_allocator: Option<bool>,
 
@@ -1072,6 +1081,12 @@ impl CommonOptions {
         if let Some(enable) = self.opts.table_lazy_init {
             config.table_lazy_init(enable);
         }
+        if let Some(bytes) = self.opts.ix_leaf_stack_slack {
+            config.ix_leaf_stack_slack(bytes);
+        }
+        if let Some(enable) = self.opts.ix_table_devirt {
+            config.ix_table_devirt(enable);
+        }
 
         if let Some(n) = self.opts.gc_zeal_alloc_counter
             && (cfg!(gc_zeal) || cfg!(fuzzing))
@@ -1434,6 +1449,8 @@ impl CommonOptions {
                 gc_heap_initial_size: Some(engine.get_gc_heap_initial_size()),
                 guard_before_linear_memory: Some(engine.get_guard_before_linear_memory()),
                 table_lazy_init: Some(engine.get_table_lazy_init()),
+                ix_leaf_stack_slack: Some(engine.get_ix_leaf_stack_slack()),
+                ix_table_devirt: Some(engine.get_ix_table_devirt()),
                 memory_init_cow: Some(engine.get_memory_init_cow()),
                 memory_guaranteed_dense_image_size: Some(
                     engine.get_memory_guaranteed_dense_image_size(),

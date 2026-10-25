@@ -222,6 +222,21 @@ define_tunables! {
         /// Kept last
         /// so the fork's fields stay after upstream's.
         pub poll_interruption: bool,
+
+        /// ix fork: bytes of the `max_wasm_stack` budget held back below the
+        /// stack limit, so that functions which make no wasm-level calls and
+        /// whose frame fits in this many bytes can skip their prologue stack
+        /// check (0 = off, upstream behaviour). See
+        /// `Config::ix_leaf_stack_slack`.
+        pub ix_leaf_stack_slack: u32,
+
+        /// ix fork: use facts about tables that the module itself can never
+        /// change (defined, not exported, never the target of `table.set`,
+        /// `table.grow`, `table.fill`, `table.copy` or `table.init`) to turn
+        /// `call_indirect` with a constant index into a direct call, and to
+        /// drop the signature check when every element has the call's type.
+        /// See `Config::ix_table_devirt`.
+        pub ix_table_devirt: bool,
     }
 
     pub struct ConfigTunables {
@@ -312,6 +327,8 @@ impl Tunables {
             branch_hinting: false,
             debug_symbols: true,
             poll_interruption: false,
+            ix_leaf_stack_slack: 0,
+            ix_table_devirt: false,
         }
     }
 

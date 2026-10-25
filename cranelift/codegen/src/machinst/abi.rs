@@ -1200,6 +1200,9 @@ pub struct Callee<M: ABIMachineSpec> {
     /// registers and keep nothing live after this sequence of instructions.
     stack_limit: Option<(Reg, SmallInstVec<M::I>)>,
 
+    /// See `FunctionStencil::stack_limit_leaf_slack` (ix fork).
+    stack_limit_leaf_slack: u32,
+
     _mach: PhantomData<M>,
 }
 
@@ -1342,6 +1345,7 @@ impl<M: ABIMachineSpec> Callee<M> {
             flags,
             isa_flags: isa_flags.clone(),
             stack_limit,
+            stack_limit_leaf_slack: f.stack_limit_leaf_slack,
             _mach: PhantomData,
         })
     }
@@ -2318,8 +2322,29 @@ impl<M: ABIMachineSpec> Callee<M> {
 
         // Leaf functions with zero stack don't need a stack check if one's
         // specified, otherwise always insert the stack check.
+        //
+        // ix fork: a function whose embedder vouched for `slack` bytes below
+        // the limit (`stack_limit_leaf_slack`, set only for functions that
+        // make no calls relying on the limit) also skips the check when its
+        // whole frame fits in that slack: at entry SP >= limit (the caller's
+        // check covered our setup area), so SP never drops below
+        // `limit - slack` here.
+        let slack = self.stack_limit_leaf_slack;
+        let within_slack = slack > 0 && total_stacksize <= slack;
+        if slack > 0
+            && self.stack_limit.is_some()
+            && (total_stacksize > 0 || frame_layout.function_calls != FunctionCalls::None)
+        {
+            log::debug!(
+                target: "ix_check_trim",
+                "stack check {} frame={total_stacksize}",
+                if within_slack { "elided" } else { "kept" }
+            );
+        }
         if total_stacksize > 0 || frame_layout.function_calls != FunctionCalls::None {
-            if let Some((reg, stack_limit_load)) = &self.stack_limit {
+            if let Some((reg, stack_limit_load)) = &self.stack_limit
+                && !within_slack
+            {
                 insts.extend(stack_limit_load.clone());
                 self.insert_stack_check(*reg, total_stacksize, &mut insts);
             }
