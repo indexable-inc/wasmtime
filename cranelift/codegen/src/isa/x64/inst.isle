@@ -1640,6 +1640,14 @@
 (rule (value32_zeros_upper32 (ishl _ _ _)) true)
 (rule (value32_zeros_upper32 (ushr _ _ _)) true)
 (rule (value32_zeros_upper32 (uload32 _ _ _ _)) true)
+;; Every 32-bit-or-narrower GPR load is lowered to a `movzx` into the full
+;; 64-bit register (`movl` for 32 bits; see `load_sub64_x64_movzx`), so the
+;; upper bits are already zero. This matters for wasm32 pointer chasing: a
+;; loaded `i32` pointer is `uextend`ed to form the next heap address.
+;; Big-endian loads have no x64 lowering, so restrict to the ones that do.
+(rule (value32_zeros_upper32 (load $I32 (little_or_native_endian _) _ _)) true)
+(rule (value32_zeros_upper32 (uload8 $I32 (little_or_native_endian _) _ _)) true)
+(rule (value32_zeros_upper32 (uload16 $I32 (little_or_native_endian _) _ _)) true)
 (rule -1 (value32_zeros_upper32 _) false)
 
 ;;;; Helpers for Working SSE tidbits ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
