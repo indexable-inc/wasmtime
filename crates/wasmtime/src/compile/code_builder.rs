@@ -862,5 +862,8 @@ impl std::hash::Hash for HashedEngineCompileEnv<'_> {
 
         // Catch accidental bugs of reusing across crate versions.
         config.module_version.hash(hasher);
+
+        // The indexable fork's `ix` intrinsic set and semantics.
+        wasmtime_environ::IX_INTRINSICS_ABI.hash(hasher);
     }
 }

@@ -1,0 +1,33 @@
+;; ix intrinsics (indexable fork): x64 lowering of the instructions in
+;; cranelift/codegen/meta/src/shared/ix_instructions.rs. The Wasm translator
+;; (crates/cranelift/src/ix_intrinsics.rs) only emits them when the ISA flags
+;; say the host has the feature.
+
+(rule (lower (x86_aesenc _ x y)) (x64_aesenc_a x y))
+(rule (lower (x86_aesenclast _ x y)) (x64_aesenclast_a x y))
+(rule (lower (x86_aesdec _ x y)) (x64_aesdec_a x y))
+(rule (lower (x86_aesdeclast _ x y)) (x64_aesdeclast_a x y))
+(rule (lower (x86_aesimc _ x)) (x64_aesimc_a x))
+(rule (lower (x86_pclmulqdq _ x y (u8_from_uimm8 imm))) (x64_pclmulqdq_a x y imm))
+(rule (lower (x86_sha256rnds2 _ x y z)) (x64_sha256rnds2_a x y z))
+(rule (lower (x86_sha256msg1 _ x y)) (x64_sha256msg1_a x y))
+(rule (lower (x86_sha256msg2 _ x y)) (x64_sha256msg2_a x y))
+
+(rule (lower (ix_crc32c _ x @ (value_type $I8) acc)) (x64_crc32b_rm acc x))
+(rule (lower (ix_crc32c _ x @ (value_type $I32) acc)) (x64_crc32l_rm acc x))
+(rule (lower (ix_crc32c _ x @ (value_type $I64) acc)) (x64_crc32q_rm acc x))
+
+(rule (lower (ix_pext $I32 x mask)) (x64_pextl_rvm x mask))
+(rule (lower (ix_pext $I64 x mask)) (x64_pextq_rvm x mask))
+(rule (lower (ix_pdep $I32 x mask)) (x64_pdepl_rvm x mask))
+(rule (lower (ix_pdep $I64 x mask)) (x64_pdepq_rvm x mask))
+
+;; `hint` is write | locality << 1. Reads map locality 3..0 onto
+;; prefetcht0, t1, t2 and nta; any write is prefetchw.
+(decl ix_prefetch_amode (Value) SyntheticAmode)
+(rule (ix_prefetch_amode p) (to_amode (mem_flags_trusted_data) p (zero_offset)))
+(rule 1 (lower (ix_prefetch p (u8_from_uimm8 6))) (side_effect (x64_prefetcht0_m (ix_prefetch_amode p))))
+(rule 1 (lower (ix_prefetch p (u8_from_uimm8 4))) (side_effect (x64_prefetcht1_m (ix_prefetch_amode p))))
+(rule 1 (lower (ix_prefetch p (u8_from_uimm8 2))) (side_effect (x64_prefetcht2_m (ix_prefetch_amode p))))
+(rule 1 (lower (ix_prefetch p (u8_from_uimm8 0))) (side_effect (x64_prefetchnta_m (ix_prefetch_amode p))))
+(rule 0 (lower (ix_prefetch p _)) (side_effect (x64_prefetchw_m (ix_prefetch_amode p))))

@@ -277,6 +277,10 @@ pub struct Module {
 
     /// WebAssembly exception and control tags.
     pub tags: TryPrimaryMap<TagIndex, Tag>,
+
+    /// Imported functions that are `ix` intrinsics (indexable fork): lowered
+    /// inline, never linked, and absent from `initializers`. Sorted by index.
+    pub ix_intrinsics: TryVec<(FuncIndex, crate::IxIntrinsic)>,
 }
 
 /// Initialization routines for creating an instance, encompassing imports,
@@ -323,7 +327,18 @@ impl Module {
             globals: Default::default(),
             global_initializers: Default::default(),
             tags: Default::default(),
+            ix_intrinsics: Default::default(),
         }
+    }
+
+    /// The `ix` intrinsic imported as `func`, if it is one.
+    #[inline]
+    pub fn ix_intrinsic(&self, func: FuncIndex) -> Option<crate::IxIntrinsic> {
+        if self.ix_intrinsics.is_empty() {
+            return None;
+        }
+        let i = self.ix_intrinsics.binary_search_by_key(&func, |(f, _)| *f).ok()?;
+        Some(self.ix_intrinsics[i].1)
     }
 
     /// Convert a `DefinedFuncIndex` into a `FuncIndex`.
@@ -668,6 +683,7 @@ impl TypeTrace for Module {
             globals,
             global_initializers: _,
             tags,
+            ix_intrinsics: _,
         } = self;
 
         for t in types.values().copied() {
@@ -720,6 +736,7 @@ impl TypeTrace for Module {
             globals,
             global_initializers: _,
             tags,
+            ix_intrinsics: _,
         } = self;
 
         for t in types.values_mut() {

@@ -116,7 +116,9 @@ impl ModuleVersionStrategy {
     /// Get the string-encoding version of the module.
     pub fn as_str(&self) -> &str {
         match &self {
-            Self::WasmtimeVersion => env!("CARGO_PKG_VERSION_MAJOR"),
+            // `+ix1`: the indexable fork's `ix` intrinsics, version
+            // `wasmtime_environ::IX_INTRINSICS_ABI` (keep the two in step).
+            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix1"),
             Self::Custom(c) => c,
             Self::None => "",
         }
@@ -4788,6 +4790,11 @@ fn detect_host_feature(feature: &str) -> Option<bool> {
             "fp16" => Some(std::arch::is_aarch64_feature_detected!("fp16")),
             "dotprod" => Some(std::arch::is_aarch64_feature_detected!("dotprod")),
             "i8mm" => Some(std::arch::is_aarch64_feature_detected!("i8mm")),
+            // ix intrinsics. Rust's `aes` includes FEAT_PMULL.
+            "aes" => Some(std::arch::is_aarch64_feature_detected!("aes")),
+            "sha2" => Some(std::arch::is_aarch64_feature_detected!("sha2")),
+            "crc" => Some(std::arch::is_aarch64_feature_detected!("crc")),
+            "sve2-bitperm" => Some(std::arch::is_aarch64_feature_detected!("sve2-bitperm")),
 
             _ => None,
         };
@@ -4853,6 +4860,10 @@ fn detect_host_feature(feature: &str) -> Option<bool> {
             "avx512vbmi" => Some(std::is_x86_feature_detected!("avx512vbmi")),
             "avx512vnni" => Some(std::is_x86_feature_detected!("avx512vnni")),
             "lzcnt" => Some(std::is_x86_feature_detected!("lzcnt")),
+            // ix intrinsics.
+            "aes" => Some(std::is_x86_feature_detected!("aes")),
+            "pclmulqdq" => Some(std::is_x86_feature_detected!("pclmulqdq")),
+            "sha" => Some(std::is_x86_feature_detected!("sha")),
 
             _ => None,
         };

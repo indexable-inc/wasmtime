@@ -12,6 +12,7 @@ mod cmp;
 mod cvt;
 mod div;
 mod fma;
+mod ix;
 mod jmp;
 mod lanes;
 mod max;
@@ -52,6 +53,7 @@ pub fn list() -> Vec<Inst> {
     all.extend(cvt::list());
     all.extend(div::list());
     all.extend(fma::list());
+    all.extend(ix::list());
     all.extend(jmp::list());
     all.extend(lanes::list());
     all.extend(max::list());

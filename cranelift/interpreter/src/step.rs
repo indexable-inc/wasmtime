@@ -1311,6 +1311,30 @@ where
         Opcode::X86Pmulhrsw => unimplemented!("X86Pmulhrsw"),
         Opcode::X86Pmaddubsw => unimplemented!("X86Pmaddubsw"),
         Opcode::X86Cvtt2dq => unimplemented!("X86Cvtt2dq"),
+        // ix intrinsics (indexable fork).
+        Opcode::X86Aesenc
+        | Opcode::X86Aesenclast
+        | Opcode::X86Aesdec
+        | Opcode::X86Aesdeclast
+        | Opcode::X86Aesimc
+        | Opcode::X86Pclmulqdq
+        | Opcode::X86Sha256rnds2
+        | Opcode::X86Sha256msg1
+        | Opcode::X86Sha256msg2
+        | Opcode::Aarch64Aese
+        | Opcode::Aarch64Aesd
+        | Opcode::Aarch64Aesmc
+        | Opcode::Aarch64Aesimc
+        | Opcode::Aarch64Pmull
+        | Opcode::Aarch64Pmull2
+        | Opcode::Aarch64Sha256h
+        | Opcode::Aarch64Sha256h2
+        | Opcode::Aarch64Sha256su0
+        | Opcode::Aarch64Sha256su1
+        | Opcode::IxCrc32c
+        | Opcode::IxPext
+        | Opcode::IxPdep
+        | Opcode::IxPrefetch => unimplemented!("ix intrinsic"),
         Opcode::StackSwitch => unimplemented!("StackSwitch"),
 
         Opcode::TryCall => unimplemented!("TryCall"),

@@ -1031,6 +1031,16 @@
        ;; A pseudoinstruction that serves as a sequence point.
        (SequencePoint)
 
+       ;; ix intrinsics (indexable fork, see `ix.isle`): one instruction given
+       ;; by its fixed bits, with the register numbers ORed into Rd [4:0],
+       ;; Rn [9:5] and Rm [20:16]. `Mod` forms read and write `rd` (tied to
+       ;; `ri`). `IxPrfm` is `prfm <bits[4:0]>, [rn]`.
+       (IxRRR (bits u32) (rd WritableReg) (rn Reg) (rm Reg))
+       (IxRR (bits u32) (rd WritableReg) (rn Reg))
+       (IxRRRMod (bits u32) (rd WritableReg) (ri Reg) (rn Reg) (rm Reg))
+       (IxRRMod (bits u32) (rd WritableReg) (ri Reg) (rn Reg))
+       (IxPrfm (bits u32) (rn Reg))
+
        ;; Emits an inline stack probe loop.
        ;;
        ;; Note that this is emitted post-regalloc so `start` and `end` can be
@@ -1229,6 +1239,11 @@
 
 ;; Leaves currently without specs: excluded from verification via todo.
 (attr MInst.Udf (tag TODO))
+(attr MInst.IxRRR (tag TODO))
+(attr MInst.IxRR (tag TODO))
+(attr MInst.IxRRRMod (tag TODO))
+(attr MInst.IxRRMod (tag TODO))
+(attr MInst.IxPrfm (tag TODO))
 (attr MInst.BitfieldMove (tag TODO))
 
 ;; An ALU operation. This can be paired with several instruction formats

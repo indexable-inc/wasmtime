@@ -3649,6 +3649,29 @@ impl MachInstEmit for Inst {
                 // Nothing.
             }
 
+            &Inst::IxRRR { bits, rd, rn, rm } => {
+                let enc = |r: Reg| u32::from(r.to_real_reg().unwrap().hw_enc() & 31);
+                sink.put4(bits | enc(rd.to_reg()) | enc(rn) << 5 | enc(rm) << 16);
+            }
+            &Inst::IxRR { bits, rd, rn } => {
+                let enc = |r: Reg| u32::from(r.to_real_reg().unwrap().hw_enc() & 31);
+                sink.put4(bits | enc(rd.to_reg()) | enc(rn) << 5);
+            }
+            &Inst::IxRRRMod { bits, rd, ri, rn, rm } => {
+                debug_assert_eq!(rd.to_reg(), ri);
+                let enc = |r: Reg| u32::from(r.to_real_reg().unwrap().hw_enc() & 31);
+                sink.put4(bits | enc(rd.to_reg()) | enc(rn) << 5 | enc(rm) << 16);
+            }
+            &Inst::IxRRMod { bits, rd, ri, rn } => {
+                debug_assert_eq!(rd.to_reg(), ri);
+                let enc = |r: Reg| u32::from(r.to_real_reg().unwrap().hw_enc() & 31);
+                sink.put4(bits | enc(rd.to_reg()) | enc(rn) << 5);
+            }
+            &Inst::IxPrfm { bits, rn } => {
+                let enc = |r: Reg| u32::from(r.to_real_reg().unwrap().hw_enc() & 31);
+                sink.put4(bits | enc(rn) << 5);
+            }
+
             &Inst::StackProbeLoop { start, end, step } => {
                 assert!(emit_info.flags.enable_probestack());
 

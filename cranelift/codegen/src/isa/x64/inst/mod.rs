@@ -1601,6 +1601,18 @@ impl asm::AvailableFeatures for &EmitInfo {
     fn apx(&self) -> bool {
         self.isa_flags.has_apx()
     }
+
+    fn aes(&self) -> bool {
+        self.isa_flags.has_aes()
+    }
+
+    fn pclmulqdq(&self) -> bool {
+        self.isa_flags.has_pclmulqdq()
+    }
+
+    fn sha(&self) -> bool {
+        self.isa_flags.has_sha()
+    }
 }
 
 impl MachInstEmit for Inst {

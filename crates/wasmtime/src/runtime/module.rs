@@ -780,6 +780,12 @@ impl Module {
         })
     }
 
+    /// The `ix` intrinsics (indexable fork) this module imports. They are
+    /// lowered inline by the compiler and are not in [`Module::imports`].
+    pub fn ix_intrinsics(&self) -> impl ExactSizeIterator<Item = crate::IxIntrinsic> + '_ {
+        self.compiled_module().module().ix_intrinsics.iter().map(|(_, i)| *i)
+    }
+
     /// Returns the list of exports that this [`Module`] has and will be
     /// available after instantiation.
     ///

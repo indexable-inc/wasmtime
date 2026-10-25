@@ -4,6 +4,7 @@ pub mod entities;
 pub mod formats;
 pub mod immediates;
 pub mod instructions;
+pub mod ix_instructions;
 pub mod settings;
 pub mod types;
 
@@ -31,6 +32,7 @@ pub(crate) fn define() -> Definitions {
     let entities = EntityRefs::new();
     let formats = Formats::new(&immediates, &entities);
     instructions::define(&mut all_instructions, &formats, &immediates, &entities);
+    ix_instructions::define(&mut all_instructions, &formats, &immediates);
     let all_formats = verify_instruction_formats(&all_instructions);
 
     Definitions {

@@ -725,6 +725,20 @@ pub fn translate_operator(
          * return values to it. `call_indirect` needs environment support because there is an
          * argument referring to an index in the external functions table of the module.
          ************************************************************************************/
+        // `ix` intrinsic imports (indexable fork) are lowered inline.
+        Operator::Call { function_index } | Operator::ReturnCall { function_index }
+            if environ
+                .module
+                .ix_intrinsic(FuncIndex::from_u32(*function_index))
+                .is_some() =>
+        {
+            let index = FuncIndex::from_u32(*function_index);
+            let intrinsic = environ.module.ix_intrinsic(index).unwrap();
+            crate::ix_intrinsics::translate(intrinsic, builder, environ)?;
+            if let Operator::ReturnCall { .. } = op {
+                translate_operator(validator, &Operator::Return, None, builder, environ)?;
+            }
+        }
         Operator::Call { function_index } => {
             let function_index = FuncIndex::from_u32(*function_index);
             let ty = environ.module.functions[function_index]

@@ -109,6 +109,16 @@ pub fn infer_native_flags(isa_builder: &mut dyn Configurable) -> Result<(), &'st
         if std::is_x86_feature_detected!("lzcnt") {
             isa_builder.enable("has_lzcnt").unwrap();
         }
+        // ix intrinsics.
+        if std::is_x86_feature_detected!("aes") {
+            isa_builder.enable("has_aes").unwrap();
+        }
+        if std::is_x86_feature_detected!("pclmulqdq") {
+            isa_builder.enable("has_pclmulqdq").unwrap();
+        }
+        if std::is_x86_feature_detected!("sha") {
+            isa_builder.enable("has_sha").unwrap();
+        }
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -131,6 +141,20 @@ pub fn infer_native_flags(isa_builder: &mut dyn Configurable) -> Result<(), &'st
 
         if std::arch::is_aarch64_feature_detected!("i8mm") {
             isa_builder.enable("has_i8mm").unwrap();
+        }
+
+        // ix intrinsics.
+        if std::arch::is_aarch64_feature_detected!("aes") {
+            isa_builder.enable("has_aes").unwrap();
+        }
+        if std::arch::is_aarch64_feature_detected!("sha2") {
+            isa_builder.enable("has_sha2").unwrap();
+        }
+        if std::arch::is_aarch64_feature_detected!("crc") {
+            isa_builder.enable("has_crc").unwrap();
+        }
+        if std::arch::is_aarch64_feature_detected!("sve2-bitperm") {
+            isa_builder.enable("has_sve2_bitperm").unwrap();
         }
 
         #[cfg(target_os = "macos")]

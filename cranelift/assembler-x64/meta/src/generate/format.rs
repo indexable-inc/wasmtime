@@ -211,7 +211,7 @@ impl dsl::Format {
             | [RegMem(mem), FixedReg(_)]
             | [Mem(mem), Imm(_)]
             | [RegMem(mem), Imm(_)]
-            | [RegMem(mem)]
+            | [RegMem(mem) | Mem(mem)]
             | [FixedReg(_), FixedReg(_), FixedReg(_), FixedReg(_), Mem(mem)] => {
                 let digit = rex.unwrap_digit().unwrap();
                 fmtln!(f, "let digit = 0x{digit:x};");

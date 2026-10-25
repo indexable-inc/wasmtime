@@ -1,0 +1,83 @@
+;; ix intrinsics (indexable fork): aarch64 lowering of the instructions in
+;; cranelift/codegen/meta/src/shared/ix_instructions.rs, emitted through the
+;; `MInst.Ix*` raw-encoding instructions. The Wasm translator
+;; (crates/cranelift/src/ix_intrinsics.rs) only emits them when the ISA flags
+;; say the host has the feature.
+
+(decl ix_rrr (u32 Type Reg Reg) Reg)
+(rule (ix_rrr bits ty rn rm)
+      (let ((dst WritableReg (temp_writable_reg ty))
+            (_ Unit (emit (MInst.IxRRR bits dst rn rm))))
+        dst))
+
+(decl ix_rr (u32 Reg) Reg)
+(rule (ix_rr bits rn)
+      (let ((dst WritableReg (temp_writable_reg $I8X16))
+            (_ Unit (emit (MInst.IxRR bits dst rn))))
+        dst))
+
+(decl ix_rrr_mod (u32 Reg Reg Reg) Reg)
+(rule (ix_rrr_mod bits ri rn rm)
+      (let ((dst WritableReg (temp_writable_reg $I8X16))
+            (_ Unit (emit (MInst.IxRRRMod bits dst ri rn rm))))
+        dst))
+
+(decl ix_rr_mod (u32 Reg Reg) Reg)
+(rule (ix_rr_mod bits ri rn)
+      (let ((dst WritableReg (temp_writable_reg $I8X16))
+            (_ Unit (emit (MInst.IxRRMod bits dst ri rn))))
+        dst))
+
+(decl ix_prfm (u32 Reg) SideEffectNoResult)
+(rule (ix_prfm bits rn) (SideEffectNoResult.Inst (MInst.IxPrfm bits rn)))
+
+;; AESE Vd.16B, Vn.16B: Vd = ShiftRows(SubBytes(Vd ^ Vn)). The translator
+;; writes an x86-style round as `aesmc(aese(s, 0)) ^ k`; when the next round
+;; consumes that, fold the key into its AESE so the chain is AESE+AESMC per
+;; round, the pair the core fuses.
+(rule 0 (lower (aarch64_aese _ x y)) (ix_rr_mod 0x4e284800 x y))
+(rule 1 (lower (aarch64_aese _ (bxor _ x k) (vconst _ (u128_from_constant 0))))
+      (ix_rr_mod 0x4e284800 x k))
+(rule 0 (lower (aarch64_aesd _ x y)) (ix_rr_mod 0x4e285800 x y))
+(rule 1 (lower (aarch64_aesd _ (bxor _ x k) (vconst _ (u128_from_constant 0))))
+      (ix_rr_mod 0x4e285800 x k))
+(rule (lower (aarch64_aesmc _ x)) (ix_rr 0x4e286800 x))
+(rule (lower (aarch64_aesimc _ x)) (ix_rr 0x4e287800 x))
+
+;; PMULL Vd.1Q, Vn.1D, Vm.1D and PMULL2 Vd.1Q, Vn.2D, Vm.2D.
+(rule (lower (aarch64_pmull _ x y)) (ix_rrr 0x0ee0e000 $I8X16 x y))
+(rule (lower (aarch64_pmull2 _ x y)) (ix_rrr 0x4ee0e000 $I8X16 x y))
+
+;; SHA256H Qd, Qn, Vm.4S; SHA256H2; SHA256SU1 Vd.4S, Vn.4S, Vm.4S; SHA256SU0 Vd.4S, Vn.4S.
+(rule (lower (aarch64_sha256h _ x y z)) (ix_rrr_mod 0x5e004000 x y z))
+(rule (lower (aarch64_sha256h2 _ x y z)) (ix_rrr_mod 0x5e005000 x y z))
+(rule (lower (aarch64_sha256su1 _ x y z)) (ix_rrr_mod 0x5e006000 x y z))
+(rule (lower (aarch64_sha256su0 _ x y)) (ix_rr_mod 0x5e282800 x y))
+
+;; CRC32CB/CW Wd, Wn, Wm and CRC32CX Wd, Wn, Xm (Wn is the accumulator).
+(rule (lower (ix_crc32c _ x @ (value_type $I8) acc)) (ix_rrr 0x1ac05000 $I32 acc x))
+(rule (lower (ix_crc32c _ x @ (value_type $I32) acc)) (ix_rrr 0x1ac05800 $I32 acc x))
+(rule (lower (ix_crc32c _ x @ (value_type $I64) acc)) (ix_rrr 0x9ac05c00 $I32 acc x))
+
+;; SVE2 BEXT/BDEP Zd.T, Zn.T, Zm.T on lane 0 (the Z registers overlay the V
+;; registers; the vector length is 128 bits on the hosts this targets, and
+;; only lane 0 is read back).
+(rule (lower (ix_pext $I32 x mask))
+      (mov_from_vec (ix_rrr 0x4580b000 $I8X16 (mov_to_fpu x (ScalarSize.Size32)) (mov_to_fpu mask (ScalarSize.Size32))) 0 (ScalarSize.Size32)))
+(rule (lower (ix_pext $I64 x mask))
+      (mov_from_vec (ix_rrr 0x45c0b000 $I8X16 (mov_to_fpu x (ScalarSize.Size64)) (mov_to_fpu mask (ScalarSize.Size64))) 0 (ScalarSize.Size64)))
+(rule (lower (ix_pdep $I32 x mask))
+      (mov_from_vec (ix_rrr 0x4580b400 $I8X16 (mov_to_fpu x (ScalarSize.Size32)) (mov_to_fpu mask (ScalarSize.Size32))) 0 (ScalarSize.Size32)))
+(rule (lower (ix_pdep $I64 x mask))
+      (mov_from_vec (ix_rrr 0x45c0b400 $I8X16 (mov_to_fpu x (ScalarSize.Size64)) (mov_to_fpu mask (ScalarSize.Size64))) 0 (ScalarSize.Size64)))
+
+;; PRFM <prfop>, [Xn]: prfop = type << 3 | target << 1 | policy. `hint` is
+;; write | locality << 1; locality 3, 2, 1 keep in L1, L2, L3, and 0 streams.
+(rule (lower (ix_prefetch p (u8_from_uimm8 6))) (side_effect (ix_prfm 0xf9800000 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 4))) (side_effect (ix_prfm 0xf9800002 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 2))) (side_effect (ix_prfm 0xf9800004 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 0))) (side_effect (ix_prfm 0xf9800001 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 7))) (side_effect (ix_prfm 0xf9800010 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 5))) (side_effect (ix_prfm 0xf9800012 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 3))) (side_effect (ix_prfm 0xf9800014 p)))
+(rule (lower (ix_prefetch p (u8_from_uimm8 1))) (side_effect (ix_prfm 0xf9800011 p)))

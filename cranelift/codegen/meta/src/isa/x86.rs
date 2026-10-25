@@ -124,6 +124,25 @@ pub(crate) fn define() -> TargetIsa {
         "BMI2: CPUID.(EAX=07H, ECX=0H):EBX.BMI2[bit 8]",
         false,
     );
+    // ix intrinsics (indexable fork); no preset uses them.
+    settings.add_bool(
+        "has_aes",
+        "Has support for AES-NI.",
+        "AES: CPUID.01H:ECX.AES[bit 25]",
+        false,
+    );
+    settings.add_bool(
+        "has_pclmulqdq",
+        "Has support for PCLMULQDQ.",
+        "PCLMULQDQ: CPUID.01H:ECX.PCLMULQDQ[bit 1]",
+        false,
+    );
+    settings.add_bool(
+        "has_sha",
+        "Has support for the SHA extensions.",
+        "SHA: CPUID.(EAX=07H, ECX=0H):EBX.SHA[bit 29]",
+        false,
+    );
 
     // CPUID.EAX=80000001H:ECX
     let has_lzcnt = settings.add_bool(

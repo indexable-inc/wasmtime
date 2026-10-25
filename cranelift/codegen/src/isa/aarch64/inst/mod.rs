@@ -964,6 +964,29 @@ fn aarch64_get_operands(inst: &mut Inst, collector: &mut impl OperandVisitor) {
             collector.reg_def(dst);
         }
         Inst::SequencePoint { .. } => {}
+        Inst::IxRRR { rd, rn, rm, .. } => {
+            collector.reg_def(rd);
+            collector.reg_use(rn);
+            collector.reg_use(rm);
+        }
+        Inst::IxRR { rd, rn, .. } => {
+            collector.reg_def(rd);
+            collector.reg_use(rn);
+        }
+        Inst::IxRRRMod { rd, ri, rn, rm, .. } => {
+            collector.reg_reuse_def(rd, 1); // `rd` == `ri`.
+            collector.reg_use(ri);
+            collector.reg_use(rn);
+            collector.reg_use(rm);
+        }
+        Inst::IxRRMod { rd, ri, rn, .. } => {
+            collector.reg_reuse_def(rd, 1); // `rd` == `ri`.
+            collector.reg_use(ri);
+            collector.reg_use(rn);
+        }
+        Inst::IxPrfm { rn, .. } => {
+            collector.reg_use(rn);
+        }
         Inst::StackProbeLoop { start, end, .. } => {
             collector.reg_early_def(start);
             collector.reg_use(end);
@@ -2995,6 +3018,34 @@ impl Inst {
             }
             &Inst::SequencePoint {} => {
                 format!("sequence_point")
+            }
+            &Inst::IxRRR { bits, rd, rn, rm } => {
+                let rd = pretty_print_reg(rd.to_reg());
+                let rn = pretty_print_reg(rn);
+                let rm = pretty_print_reg(rm);
+                format!("ix.inst {bits:#010x} {rd}, {rn}, {rm}")
+            }
+            &Inst::IxRR { bits, rd, rn } => {
+                let rd = pretty_print_reg(rd.to_reg());
+                let rn = pretty_print_reg(rn);
+                format!("ix.inst {bits:#010x} {rd}, {rn}")
+            }
+            &Inst::IxRRRMod { bits, rd, ri, rn, rm } => {
+                let rd = pretty_print_reg(rd.to_reg());
+                let ri = pretty_print_reg(ri);
+                let rn = pretty_print_reg(rn);
+                let rm = pretty_print_reg(rm);
+                format!("ix.inst {bits:#010x} {rd}, {ri}, {rn}, {rm}")
+            }
+            &Inst::IxRRMod { bits, rd, ri, rn } => {
+                let rd = pretty_print_reg(rd.to_reg());
+                let ri = pretty_print_reg(ri);
+                let rn = pretty_print_reg(rn);
+                format!("ix.inst {bits:#010x} {rd}, {ri}, {rn}")
+            }
+            &Inst::IxPrfm { bits, rn } => {
+                let rn = pretty_print_reg(rn);
+                format!("prfm {:#x}, [{rn}]", bits & 0x1f)
             }
             &Inst::StackProbeLoop { start, end, step } => {
                 let start = pretty_print_reg(start.to_reg());

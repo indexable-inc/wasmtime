@@ -40,6 +40,11 @@ pub(crate) fn define() -> TargetIsa {
         "",
         false,
     );
+    // ix intrinsics (indexable fork).
+    settings.add_bool("has_aes", "Has FEAT_AES and FEAT_PMULL.", "", false);
+    settings.add_bool("has_sha2", "Has FEAT_SHA256.", "", false);
+    settings.add_bool("has_crc", "Has FEAT_CRC32.", "", false);
+    settings.add_bool("has_sve2_bitperm", "Has FEAT_SVE2 and FEAT_SVE_BitPerm.", "", false);
     settings.add_bool(
         "sign_return_address_all",
         "If function return address signing is enabled, then apply it to all \

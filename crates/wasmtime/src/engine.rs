@@ -590,6 +590,11 @@ information about this check\
             "has_fp16" => "fp16",
             "has_dotprod" => "dotprod",
             "has_i8mm" => "i8mm",
+            // ix intrinsics; `has_aes` is also the x64 flag, also "aes".
+            "has_aes" => "aes",
+            "has_sha2" => "sha2",
+            "has_crc" => "crc",
+            "has_sve2_bitperm" => "sve2-bitperm",
 
             // aarch64 features which don't need detection
             // No effect on its own.
@@ -630,6 +635,8 @@ information about this check\
             "has_avx512vbmi" => "avx512vbmi",
             "has_avx512vnni" => "avx512vnni",
             "has_lzcnt" => "lzcnt",
+            "has_pclmulqdq" => "pclmulqdq",
+            "has_sha" => "sha",
 
             // pulley features
             "big_endian" if cfg!(target_endian = "big") => return Ok(()),

@@ -1207,16 +1207,37 @@ impl Instance {
         //
         // SAFETY: the vmctx is safe to initialize during this function and
         // validity of each item itself is a contract the caller must uphold.
-        debug_assert_eq!(imports.functions.len(), module.num_imported_funcs);
+        debug_assert_eq!(
+            imports.functions.len() + module.ix_intrinsics.len(),
+            module.num_imported_funcs
+        );
         unsafe {
             let offsets = instance.runtime_info.offsets();
-            ptr::copy_nonoverlapping(
-                imports.functions.as_ptr(),
-                instance
-                    .vmctx_plus_offset_raw(offsets.imported_functions().begin())
-                    .as_ptr(),
-                imports.functions.len(),
-            );
+            if module.ix_intrinsics.is_empty() {
+                ptr::copy_nonoverlapping(
+                    imports.functions.as_ptr(),
+                    instance
+                        .vmctx_plus_offset_raw(offsets.imported_functions().begin())
+                        .as_ptr(),
+                    imports.functions.len(),
+                );
+            } else {
+                // `ix` intrinsics (indexable fork) hold an imported-function
+                // slot that compiled code never reads; leave it zeroed and
+                // fill the others in order.
+                let mut linked = imports.functions.iter();
+                for i in 0..module.num_imported_funcs {
+                    let index = FuncIndex::from_u32(i as u32);
+                    let slot = instance.vmctx_plus_offset_raw::<VMFunctionImport>(
+                        offsets.imported_functions().at(index),
+                    );
+                    if module.ix_intrinsic(index).is_some() {
+                        ptr::write_bytes(slot.as_ptr(), 0, 1);
+                    } else {
+                        ptr::copy_nonoverlapping(linked.next().unwrap(), slot.as_ptr(), 1);
+                    }
+                }
+            }
             debug_assert_eq!(imports.tables.len(), module.num_imported_tables);
             ptr::copy_nonoverlapping(
                 imports.tables.as_ptr(),

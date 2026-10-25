@@ -44,6 +44,7 @@ mod compiler;
 mod component_sync_call;
 mod debug;
 mod func_environ;
+mod ix_intrinsics;
 mod translate;
 mod trap;
 

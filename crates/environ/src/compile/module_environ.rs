@@ -478,6 +478,18 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
             Payload::End(offset) => {
                 self.result.types = Some(self.validator.end(offset)?);
 
+                for (func, intrinsic) in self.result.module.ix_intrinsics.iter() {
+                    if self.result.module.functions[*func].is_escaping()
+                        || self.result.start_func == Some(*func)
+                    {
+                        bail!(
+                            "`ix.{}` can only be called directly: it may not be exported, \
+                             put in a table, used by `ref.func` or be the start function",
+                            intrinsic.name()
+                        );
+                    }
+                }
+
                 // With the `escaped_funcs` set of functions finished
                 // we can calculate the set of signatures that are exported as
                 // the set of exported functions' signatures.
@@ -597,6 +609,26 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                             bail!("custom-descriptors proposal not implemented yet");
                         }
                     };
+                    if import.module == crate::IX_INTRINSIC_MODULE {
+                        if let (Some(intrinsic), EntityType::Function(sig)) =
+                            (crate::IxIntrinsic::from_name(import.name), &ty)
+                        {
+                            let sig = sig.unwrap_module_type_index();
+                            let func_ty = self.types[sig].unwrap_func();
+                            if !intrinsic.matches(func_ty) {
+                                bail!(
+                                    "import `ix.{}` must have type {}, found {func_ty}",
+                                    intrinsic.name(),
+                                    intrinsic.signature(),
+                                );
+                            }
+                            // No initializer and not flagged as escaping:
+                            // the translator lowers its calls inline.
+                            let index = self.result.module.push_function(sig);
+                            self.result.module.ix_intrinsics.push((index, intrinsic))?;
+                            continue;
+                        }
+                    }
                     self.declare_import(import.module, import.name, ty)?;
                 }
             }

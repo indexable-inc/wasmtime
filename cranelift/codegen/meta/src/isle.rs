@@ -203,6 +203,7 @@ pub fn get_isle_compilations(
                     vec![
                         src_isa_x64.join("inst.isle"),
                         src_isa_x64.join("lower.isle"),
+                        src_isa_x64.join("ix.isle"),
                     ],
                 ]
                 .concat(),
@@ -232,6 +233,7 @@ pub fn get_isle_compilations(
                     vec![
                         src_isa_aarch64.join("lower.isle"),
                         src_isa_aarch64.join("lower_dynamic_neon.isle"),
+                        src_isa_aarch64.join("ix.isle"),
                     ],
                 ]
                 .concat(),
