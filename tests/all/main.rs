@@ -37,6 +37,7 @@ mod instance;
 mod intrinsics;
 mod invoke_func_via_table;
 mod ix_check_trim;
+mod ix_indirect;
 mod limits;
 mod linker;
 mod memory;

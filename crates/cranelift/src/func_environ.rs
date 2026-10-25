@@ -1817,6 +1817,19 @@ impl FuncEnvironment<'_> {
         (have == want).then_some(f)
     }
 
+    /// ix fork: the dispatch row (first entry, table size) for a
+    /// `call_indirect` of `ty_index` through `table`, when the module has
+    /// one (`Tunables::ix_static_call_indirect`; see
+    /// `wasmtime_environ::IxDispatchPlan`).
+    fn ix_dispatch_row(&self, table: TableIndex, ty_index: TypeIndex) -> Option<(u32, u32)> {
+        if !self.tunables.ix_static_call_indirect {
+            return None;
+        }
+        let ty = self.module.types[ty_index].unwrap_module_type_index();
+        let (row, n) = self.module.ix_dispatch.row(table, ty)?;
+        Some((row.start, n))
+    }
+
     fn make_table(&mut self, func: &mut ir::Function, index: TableIndex) -> TableData {
         let table = self.module.tables[index];
         let element_size = if table.ref_type.is_vmgcref_type() {
@@ -2297,6 +2310,17 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
                 Reachability::Unreachable => None,
             });
         }
+        // ix fork: a static table with a dispatch row for this type.
+        if let Some((start, n)) = self.env.ix_dispatch_row(table_index, ty_index) {
+            return self.ix_dispatch_call(table_index, ty_index, sig_ref, callee, call_args, start, n);
+        }
+        // ix fork, UNSAFE bench-only ceiling (`Tunables::ix_unsafe_ci_nocheck`).
+        if self.env.tunables.ix_unsafe_ci_nocheck > 0 {
+            let (code_ptr, callee_vmctx) = self.ix_unsafe_load_code(table_index, callee);
+            return self
+                .unchecked_call_impl(sig_ref, code_ptr, callee_vmctx, call_args)
+                .map(Some);
+        }
         let (code_ptr, callee_vmctx) = match self.check_and_load_code_and_callee_vmctx(
             table_index,
             ty_index,
@@ -2309,6 +2333,123 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
 
         self.unchecked_call_impl(sig_ref, code_ptr, callee_vmctx, call_args)
             .map(Some)
+    }
+
+    /// ix fork: `call_indirect` through a dispatch row
+    /// (`wasmtime_environ::IxDispatchPlan`). The row has `n + 1` entries
+    /// from `start`: entry `i < n` is the code of element `i` when its
+    /// function has exactly the call's (final) type, else 0, and entry `n`
+    /// is 0. So:
+    ///
+    /// * the index is clamped to `n` with a Spectre-safe select (no
+    ///   branch), so the load stays inside the row even under
+    ///   misspeculation;
+    /// * a non-zero entry is a function of this module of the right type:
+    ///   call it with our own vmctx as its vmctx too (every element of a
+    ///   static table is this instance's own function);
+    /// * a zero entry means out of bounds, null, or a type mismatch: the
+    ///   ordinary fully checked lowering then always traps, with the right
+    ///   trap code, in a cold block.
+    fn ix_dispatch_call(
+        mut self,
+        table_index: TableIndex,
+        ty_index: TypeIndex,
+        sig_ref: ir::SigRef,
+        callee: ir::Value,
+        call_args: &[ir::Value],
+        start: u32,
+        n: u32,
+    ) -> WasmResult<Option<CallRets>> {
+        log::debug!(target: "ix_check_trim", "call_indirect via dispatch row at {start} (n={n})");
+        let pointer_type = self.env.pointer_type();
+        let vmctx = self.caller_vmctx();
+        let base = self
+            .env
+            .alias_regions
+            .vmctx()
+            .ix_dispatch()
+            .load(&mut self.builder.cursor(), vmctx);
+        let index_ty = self.builder.func.dfg.value_type(callee);
+        let bound = self.builder.ins().iconst(index_ty, i64::from(n));
+        let oob = self
+            .builder
+            .ins()
+            .icmp(IntCC::UnsignedGreaterThanOrEqual, callee, bound);
+        let mut index = self.builder.ins().select_spectre_guard(oob, bound, callee);
+        if pointer_type.bytes() > index_ty.bytes() {
+            index = self.builder.ins().uextend(pointer_type, index);
+        }
+        let offset = self
+            .builder
+            .ins()
+            .ishl_imm_u(index, i64::from(pointer_type.bytes().trailing_zeros()));
+        let addr = self.builder.ins().iadd(base, offset);
+        let row_offset = i32::try_from(u64::from(start) * u64::from(pointer_type.bytes()))
+            .expect("dispatch array capped well below 2 GiB");
+        let code = self.builder.ins().load(
+            pointer_type,
+            ir::MemFlagsData::trusted().with_readonly(),
+            addr,
+            row_offset,
+        );
+
+        let fast = self.builder.create_block();
+        let slow = self.builder.create_block();
+        self.builder.set_cold_block(slow);
+        self.builder.ins().brif(code, fast, &[], slow, &[]);
+
+        self.builder.switch_to_block(slow);
+        self.builder.seal_block(slow);
+        if self
+            .check_and_load_code_and_callee_vmctx(table_index, ty_index, callee, true)?
+            .is_some()
+        {
+            // The checks above trap for every index with a zero entry; this
+            // is never reached.
+            self.env.trap(self.builder, crate::TRAP_BAD_SIGNATURE);
+        }
+
+        self.builder.switch_to_block(fast);
+        self.builder.seal_block(fast);
+        self.unchecked_call_impl(sig_ref, code, vmctx, call_args)
+            .map(Some)
+    }
+
+    /// ix fork, UNSAFE: the table element's code pointer and vmctx with no
+    /// bounds, Spectre, lazy-init, null or signature check. Bench only.
+    fn ix_unsafe_load_code(
+        &mut self,
+        table_index: TableIndex,
+        callee: ir::Value,
+    ) -> (ir::Value, ir::Value) {
+        let pointer_type = self.env.pointer_type();
+        let table_data = self.env.get_or_create_table(self.builder.func, table_index);
+        let mut index = callee;
+        if pointer_type.bytes() > self.builder.func.dfg.value_type(index).bytes() {
+            index = self.builder.ins().uextend(pointer_type, index);
+        }
+        let vmctx = self.caller_vmctx();
+        let base = table_data.base.emit(&mut self.builder.cursor(), vmctx);
+        let offset = self
+            .builder
+            .ins()
+            .ishl_imm_u(index, i64::from(table_data.element_size.trailing_zeros()));
+        let addr = self.builder.ins().iadd(base, offset);
+        let raw = self
+            .builder
+            .ins()
+            .load(pointer_type, ir::MemFlagsData::trusted(), addr, 0);
+        let funcref = if self.env.tunables.table_lazy_init {
+            self.builder.ins().band_imm_u(raw, Imm64::from(-2))
+        } else {
+            raw
+        };
+        let (code, callee_vmctx) = self.load_code_and_vmctx(funcref, None);
+        if self.env.tunables.ix_unsafe_ci_nocheck >= 2 {
+            (code, vmctx)
+        } else {
+            (code, callee_vmctx)
+        }
     }
 
     fn check_and_load_code_and_callee_vmctx(

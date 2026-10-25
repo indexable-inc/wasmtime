@@ -902,7 +902,9 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                 }
                 // ix fork: note every table this body can write. (Off under
                 // guest debugging, where a debugger may touch any state.)
-                if self.tunables.ix_table_devirt && !self.tunables.debug_guest {
+                if (self.tunables.ix_table_devirt || self.tunables.ix_static_call_indirect)
+                    && !self.tunables.debug_guest
+                {
                     self.result.ix_table_writes.scan(&body);
                 }
                 if self.tunables.debug_guest {
@@ -1567,8 +1569,12 @@ impl ModuleTranslation<'_> {
     /// tables into static precomputed images.
     pub fn finalize_table_init(&mut self, tunables: &Tunables, types: &mut ModuleTypesBuilder) {
         // ix fork: before the initializers are rewritten below.
-        if tunables.ix_table_devirt && !tunables.debug_guest {
+        if (tunables.ix_table_devirt || tunables.ix_static_call_indirect) && !tunables.debug_guest
+        {
             self.ix_compute_static_tables();
+        }
+        if tunables.ix_static_call_indirect && !tunables.debug_guest {
+            self.ix_compute_dispatch(types);
         }
         if tunables.table_lazy_init {
             self.try_func_table_init();

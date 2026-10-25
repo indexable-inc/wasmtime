@@ -407,6 +407,14 @@ impl ModuleRuntimeInfo {
         }
     }
 
+    /// ix fork: the module's `call_indirect` dispatch array, or null.
+    fn ix_dispatch(&self) -> *const usize {
+        match self {
+            ModuleRuntimeInfo::Module(m) => m.ix_dispatch_ptr(),
+            ModuleRuntimeInfo::Bare(_) => core::ptr::null(),
+        }
+    }
+
     /// Returns an array, indexed by `ModuleInternedTypeIndex` of all
     /// `VMSharedSignatureIndex` entries corresponding to the `SignatureIndex`.
     fn type_ids(&self) -> &[VMSharedTypeIndex] {

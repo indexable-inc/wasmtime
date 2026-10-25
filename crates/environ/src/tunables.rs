@@ -223,6 +223,20 @@ define_tunables! {
         /// drop the signature check when every element has the call's type.
         /// See `Config::ix_table_devirt`.
         pub ix_table_devirt: bool,
+
+        /// ix fork, UNSAFE, bench only: drop checks on every `call_indirect`
+        /// to measure their cost. 0 = off. 1 = no bounds check, Spectre mask,
+        /// null check or signature check. 2 = also pass the caller's vmctx as
+        /// the callee's (only correct when every table element is a function
+        /// the module defines). Never for untrusted code.
+        pub ix_unsafe_ci_nocheck: u32,
+
+        /// ix fork: lower `call_indirect` through a static table (see
+        /// `ix_table_devirt`'s facts, from the module's own bytes) to a load
+        /// from a per-type, read-only dispatch array shared by every
+        /// instance, with no null or signature check. See
+        /// `Config::ix_static_call_indirect`.
+        pub ix_static_call_indirect: bool,
     }
 
     pub struct ConfigTunables {
@@ -314,6 +328,8 @@ impl Tunables {
             debug_symbols: true,
             ix_leaf_stack_slack: 0,
             ix_table_devirt: false,
+            ix_unsafe_ci_nocheck: 0,
+            ix_static_call_indirect: false,
         }
     }
 

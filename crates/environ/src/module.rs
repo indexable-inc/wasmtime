@@ -281,6 +281,10 @@ pub struct Module {
     /// Imported functions that are `ix` intrinsics (indexable fork): lowered
     /// inline, never linked, and absent from `initializers`. Sorted by index.
     pub ix_intrinsics: TryVec<(FuncIndex, crate::IxIntrinsic)>,
+
+    /// ix fork: the `call_indirect` dispatch plan
+    /// (`Tunables::ix_static_call_indirect`); empty when off.
+    pub ix_dispatch: crate::IxDispatchPlan,
 }
 
 /// Initialization routines for creating an instance, encompassing imports,
@@ -328,6 +332,7 @@ impl Module {
             global_initializers: Default::default(),
             tags: Default::default(),
             ix_intrinsics: Default::default(),
+            ix_dispatch: Default::default(),
         }
     }
 
@@ -684,6 +689,7 @@ impl TypeTrace for Module {
             global_initializers: _,
             tags,
             ix_intrinsics: _,
+            ix_dispatch: _,
         } = self;
 
         for t in types.values().copied() {
@@ -737,6 +743,7 @@ impl TypeTrace for Module {
             global_initializers: _,
             tags,
             ix_intrinsics: _,
+            ix_dispatch: _,
         } = self;
 
         for t in types.values_mut() {

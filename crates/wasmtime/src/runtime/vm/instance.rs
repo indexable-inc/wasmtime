@@ -1189,6 +1189,19 @@ impl Instance {
             instance.type_ids_array().write(types.cast().into());
         }
 
+        // ix fork: the module's shared read-only dispatch array (or null).
+        //
+        // SAFETY: the field is a pointer-sized slot in the vmctx being
+        // initialized; the array lives as long as the module, which this
+        // instance keeps alive.
+        unsafe {
+            let offsets = instance.runtime_info.offsets();
+            let ptr = NonNull::new(instance.runtime_info.ix_dispatch().cast_mut()).map(VmPtr::from);
+            instance
+                .vmctx_plus_offset_raw::<Option<VmPtr<usize>>>(offsets.ptr.vmctx().ix_dispatch())
+                .write(ptr);
+        }
+
         // Initialize the built-in functions
         //
         // SAFETY: the type of the builtin functions field is indeed a pointer

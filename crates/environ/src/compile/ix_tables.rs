@@ -20,11 +20,13 @@
 //! result for the compiler.
 
 use crate::module::TableSegmentElements;
+use crate::{IxDispatchPlan, IxDispatchRow};
 use crate::{
     ConstOp, DefinedTableIndex, EntityIndex, FuncIndex, ModuleInternedTypeIndex, ModuleTranslation,
     TableIndex, TableInitialValue, WasmHeapType,
 };
 use alloc::{sync::Arc, vec, vec::Vec};
+use cranelift_entity::EntityRef;
 use cranelift_entity::packed_option::ReservedValue;
 use wasmparser::{FunctionBody, Operator};
 
@@ -32,6 +34,9 @@ use wasmparser::{FunctionBody, Operator};
 #[derive(Default)]
 pub struct IxTableWrites {
     written: Vec<u32>,
+    /// `(table, type index)` of every `call_indirect` and
+    /// `return_call_indirect`, deduplicated after the scan.
+    call_indirect: Vec<(u32, u32)>,
     /// A body failed to parse: treat every table as written. (Such a module
     /// fails validation anyway; this only keeps the fact sound regardless.)
     all: bool,
@@ -56,10 +61,25 @@ impl IxTableWrites {
                 | Operator::TableCopy {
                     dst_table: table, ..
                 } => self.written.push(table),
+                Operator::CallIndirect {
+                    type_index,
+                    table_index,
+                }
+                | Operator::ReturnCallIndirect {
+                    type_index,
+                    table_index,
+                } => self.call_indirect.push((table_index, type_index)),
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// Sort and deduplicate what the scan collected (called once, after
+    /// every body has been scanned).
+    fn finish(&mut self) {
+        self.call_indirect.sort_unstable();
+        self.call_indirect.dedup();
     }
 
     fn is_written(&self, table: TableIndex) -> bool {
@@ -89,6 +109,101 @@ impl ModuleTranslation<'_> {
             out.push(self.ix_static_table(def, index, init));
         }
         self.ix_static_tables = out;
+    }
+
+    /// Plan the `call_indirect` dispatch rows (`Tunables::ix_static_call_indirect`)
+    /// into `self.module.ix_dispatch`. Needs `ix_static_tables`.
+    ///
+    /// A row is made for each `(table, type)` pair some body calls through
+    /// when:
+    ///
+    /// * the table is static (above), 32-bit indexed, and every non-null
+    ///   element is a function this module defines, so the caller's own
+    ///   vmctx is the callee's (all elements are this instance's
+    ///   functions);
+    /// * the type is final, so a callee matches it exactly when its
+    ///   engine-canonical type index equals the type's (no subtypes).
+    ///
+    /// The runtime fills each row once per module (see
+    /// `IxDispatchPlan`); the compiler lowers calls through a row with no
+    /// bounds, null or signature check on the hot path.
+    pub(crate) fn ix_compute_dispatch(&mut self, types: &crate::ModuleTypesBuilder) {
+        // Cap the array at 32 MiB of pointers; rows past it keep checks.
+        const MAX_ENTRIES: u64 = 1 << 22;
+        self.ix_table_writes.finish();
+        let module = &self.module;
+        let mut plan = IxDispatchPlan::default();
+        let mut image_of: Vec<Option<u32>> = vec![None; self.ix_static_tables.len()];
+        let mut entries: u64 = 0;
+        for &(table, ty) in self.ix_table_writes.call_indirect.iter() {
+            let table = TableIndex::from_u32(table);
+            let Some(def) = module.defined_table_index(table) else {
+                continue;
+            };
+            let Some(Some(st)) = self.ix_static_tables.get(def.index()) else {
+                continue;
+            };
+            if module.tables[table].idx_type != crate::IndexType::I32 {
+                continue;
+            }
+            let Some(ty) = module.types.get(crate::TypeIndex::from_u32(ty)) else {
+                continue;
+            };
+            let crate::EngineOrModuleTypeIndex::Module(ty) = *ty else {
+                continue;
+            };
+            if !types[ty].is_final {
+                continue;
+            }
+            // Two type indices may intern to the same type.
+            if plan.rows.iter().any(|r| r.table == table && r.ty == ty) {
+                continue;
+            }
+            let image = match image_of[def.index()] {
+                Some(i) => i,
+                None => {
+                    let mut img = Vec::with_capacity(st.funcs.len());
+                    let mut ok = true;
+                    for f in st.funcs.iter() {
+                        if f.is_reserved_value() {
+                            img.push(u32::MAX);
+                        } else if let Some(d) = module.defined_func_index(*f) {
+                            img.push(d.as_u32());
+                        } else {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if !ok {
+                        continue;
+                    }
+                    let i = u32::try_from(plan.images.len()).unwrap();
+                    plan.images.push(img);
+                    image_of[def.index()] = Some(i);
+                    i
+                }
+            };
+            let len = plan.images[image as usize].len() as u64 + 1;
+            if entries + len > MAX_ENTRIES {
+                continue;
+            }
+            plan.rows.push(IxDispatchRow {
+                table,
+                ty,
+                image,
+                start: u32::try_from(entries).unwrap(),
+            });
+            entries += len;
+        }
+        plan.entries = u32::try_from(entries).unwrap();
+        log::debug!(
+            target: "ix_check_trim",
+            "ix dispatch: {} rows, {} entries over {} tables",
+            plan.rows.len(),
+            plan.entries,
+            plan.images.len()
+        );
+        self.module.ix_dispatch = plan;
     }
 
     fn ix_static_table(
