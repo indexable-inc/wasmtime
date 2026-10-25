@@ -1,0 +1,269 @@
+test compile precise-output
+set unwind_info=false
+target aarch64 use_bti sign_return_address sign_return_address_with_bkey has_pauth
+
+;; `paciasp`/`pacibsp` are implicit `bti c` landing pads, but the zero-modifier
+;; forms used by the `tail` calling convention (`paciaz`/`pacibz`) are not, so
+;; a `tail` function must start with an explicit `bti c` before signing.
+
+function %tail_with_frame(i64) -> i64 tail {
+    fn0 = %g(i64) -> i64 tail
+
+block0(v0: i64):
+    v1 = call fn0(v0)
+    return v1
+}
+
+; VCode:
+;   bti c
+;   pacibz
+;   stp fp, lr, [sp, #-16]!
+;   mov fp, sp
+; block0:
+;   load_ext_name_far x3, TestCase(%g)+0
+;   blr x3
+;   ldp fp, lr, [sp], #16
+;   retabz
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bti c
+;   pacibz
+;   stp x29, x30, [sp, #-0x10]!
+;   mov x29, sp
+; block1: ; offset 0x10
+;   ldr x3, #0x18
+;   b #0x20
+;   udf #0 ; reloc_external Abs8 %g 0
+;   udf #0
+;   blr x3
+;   ldp x29, x30, [sp], #0x10
+;   autibz
+;   ret
+
+function %tail_leaf(i64) -> i64 tail {
+block0(v0: i64):
+    v9 = iconst.i64 1
+    v1 = iadd v0, v9
+    return v1
+}
+
+; VCode:
+;   bti c
+; block0:
+;   add x2, x2, #1
+;   ret
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bti c
+; block1: ; offset 0x4
+;   add x2, x2, #1
+;   ret
+
+function %tail_return_call(i64) -> i64 tail {
+    fn0 = %g(i64) -> i64 tail
+
+block0(v0: i64):
+    v9 = iconst.i64 1
+    v1 = iadd v0, v9
+    v2 = call fn0(v1)
+    return_call fn0(v2)
+}
+
+; VCode:
+;   bti c
+;   pacibz
+;   stp fp, lr, [sp, #-16]!
+;   mov fp, sp
+; block0:
+;   add x2, x2, #1
+;   load_ext_name_far x5, TestCase(%g)+0
+;   blr x5
+;   load_ext_name_far x1, TestCase(%g)+0
+;   return_call_ind x1 new_stack_arg_size:0 x2=x2
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bti c
+;   pacibz
+;   stp x29, x30, [sp, #-0x10]!
+;   mov x29, sp
+; block1: ; offset 0x10
+;   add x2, x2, #1
+;   ldr x5, #0x1c
+;   b #0x24
+;   udf #0 ; reloc_external Abs8 %g 0
+;   udf #0
+;   blr x5
+;   ldr x1, #0x30
+;   b #0x38
+;   udf #0 ; reloc_external Abs8 %g 0
+;   udf #0
+;   ldp x29, x30, [sp], #0x10
+;   autibz
+;   mov x16, x1
+;   br x16
+
+function %default_with_frame(i64) -> i64 {
+    fn0 = %g(i64) -> i64
+
+block0(v0: i64):
+    v1 = call fn0(v0)
+    return v1
+}
+
+; VCode:
+;   pacibsp
+;   stp fp, lr, [sp, #-16]!
+;   mov fp, sp
+; block0:
+;   load_ext_name_far x3, TestCase(%g)+0
+;   blr x3
+;   ldp fp, lr, [sp], #16
+;   retabsp
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   pacibsp
+;   stp x29, x30, [sp, #-0x10]!
+;   mov x29, sp
+; block1: ; offset 0xc
+;   ldr x3, #0x14
+;   b #0x1c
+;   udf #0 ; reloc_external Abs8 %g 0
+;   udf #0
+;   blr x3
+;   ldp x29, x30, [sp], #0x10
+;   retab
+
+
+;; The unwinder enters an exception handler with `br x4`, so the handler
+;; block needs `bti j`; the normal-return block does not.
+function %try_call_handler(i32) -> i32 tail {
+    sig0 = (i32) -> i32 tail
+    fn0 = colocated %g(i32) -> i32 tail
+
+block0(v0: i32):
+    try_call fn0(v0), sig0, block1(ret0), [ default: block2(exn0) ]
+
+block1(v1: i32):
+    return v1
+
+block2(v2: i64):
+    v3 = ireduce.i32 v2
+    return v3
+}
+
+; VCode:
+;   bti c
+;   pacibz
+;   stp fp, lr, [sp, #-16]!
+;   mov fp, sp
+;   stp x27, x28, [sp, #-16]!
+;   stp x25, x26, [sp, #-16]!
+;   stp x23, x24, [sp, #-16]!
+;   stp x21, x22, [sp, #-16]!
+;   stp x19, x20, [sp, #-16]!
+;   stp d14, d15, [sp, #-16]!
+;   stp d12, d13, [sp, #-16]!
+;   stp d10, d11, [sp, #-16]!
+;   stp d8, d9, [sp, #-16]!
+; block0:
+;   bl 0; b MachLabel(1); catch [default: MachLabel(2)]
+; block1:
+;   ldp d8, d9, [sp], #16
+;   ldp d10, d11, [sp], #16
+;   ldp d12, d13, [sp], #16
+;   ldp d14, d15, [sp], #16
+;   ldp x19, x20, [sp], #16
+;   ldp x21, x22, [sp], #16
+;   ldp x23, x24, [sp], #16
+;   ldp x25, x26, [sp], #16
+;   ldp x27, x28, [sp], #16
+;   ldp fp, lr, [sp], #16
+;   retabz
+; block2:
+;   bti j
+;   mov x2, x0
+;   ldp d8, d9, [sp], #16
+;   ldp d10, d11, [sp], #16
+;   ldp d12, d13, [sp], #16
+;   ldp d14, d15, [sp], #16
+;   ldp x19, x20, [sp], #16
+;   ldp x21, x22, [sp], #16
+;   ldp x23, x24, [sp], #16
+;   ldp x25, x26, [sp], #16
+;   ldp x27, x28, [sp], #16
+;   ldp fp, lr, [sp], #16
+;   retabz
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bti c
+;   pacibz
+;   stp x29, x30, [sp, #-0x10]!
+;   mov x29, sp
+;   stp x27, x28, [sp, #-0x10]!
+;   stp x25, x26, [sp, #-0x10]!
+;   stp x23, x24, [sp, #-0x10]!
+;   stp x21, x22, [sp, #-0x10]!
+;   stp x19, x20, [sp, #-0x10]!
+;   stp d14, d15, [sp, #-0x10]!
+;   stp d12, d13, [sp, #-0x10]!
+;   stp d10, d11, [sp, #-0x10]!
+;   stp d8, d9, [sp, #-0x10]!
+; block1: ; offset 0x34
+;   bl #0x34 ; reloc_external Call %g 0
+; block2: ; offset 0x38
+;   ldp d8, d9, [sp], #0x10
+;   ldp d10, d11, [sp], #0x10
+;   ldp d12, d13, [sp], #0x10
+;   ldp d14, d15, [sp], #0x10
+;   ldp x19, x20, [sp], #0x10
+;   ldp x21, x22, [sp], #0x10
+;   ldp x23, x24, [sp], #0x10
+;   ldp x25, x26, [sp], #0x10
+;   ldp x27, x28, [sp], #0x10
+;   ldp x29, x30, [sp], #0x10
+;   autibz
+;   ret
+; block3: ; offset 0x68
+;   bti j
+;   mov x2, x0
+;   ldp d8, d9, [sp], #0x10
+;   ldp d10, d11, [sp], #0x10
+;   ldp d12, d13, [sp], #0x10
+;   ldp d14, d15, [sp], #0x10
+;   ldp x19, x20, [sp], #0x10
+;   ldp x21, x22, [sp], #0x10
+;   ldp x23, x24, [sp], #0x10
+;   ldp x25, x26, [sp], #0x10
+;   ldp x27, x28, [sp], #0x10
+;   ldp x29, x30, [sp], #0x10
+;   autibz
+;   ret
+
+;; `return_call_indirect` branches with `br`, which a `bti c` landing pad
+;; accepts only through x16/x17.
+function %tail_return_call_indirect(i64, i64) -> i64 tail {
+    sig0 = (i64) -> i64 tail
+
+block0(v0: i64, v1: i64):
+    return_call_indirect sig0, v1(v0)
+}
+
+; VCode:
+;   bti c
+; block0:
+;   mov x1, x3
+;   return_call_ind x1 new_stack_arg_size:0 x2=x2
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bti c
+; block1: ; offset 0x4
+;   mov x1, x3
+;   mov x16, x1
+;   br x16
+

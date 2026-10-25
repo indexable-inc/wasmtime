@@ -711,6 +711,19 @@ impl APIKey {
         };
         0xd503201f | (crm << 8) | (op2 << 5)
     }
+
+    /// Whether the `paci{key}` instruction for this key also acts as an
+    /// implicit `bti c` landing pad.
+    ///
+    /// Only `paciasp` and `pacibsp` do; the zero-modifier forms (`paciaz`,
+    /// `pacibz`) are not landing pads, so a function that starts with one of
+    /// them still needs an explicit `bti c` when BTI is enabled.
+    pub fn is_implicit_bti_c(&self) -> bool {
+        match self {
+            APIKey::ASP | APIKey::BSP => true,
+            APIKey::AZ | APIKey::BZ => false,
+        }
+    }
 }
 
 /// "Package" of the arguments for the instruction `AtomicCAS128` to avoid

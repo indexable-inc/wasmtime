@@ -645,6 +645,15 @@ impl ABIMachineSpec for AArch64MachineDeps {
 
         match Self::select_api_key(isa_flags, call_conv, setup_frame) {
             Some(key) => {
+                // `paciasp`/`pacibsp` are implicit `bti c` landing pads, but
+                // the zero-modifier forms used by the `tail` calling
+                // convention (`paciaz`/`pacibz`) are not, so emit an explicit
+                // `bti c` first or indirect calls into the function fault.
+                if isa_flags.use_bti() && !key.is_implicit_bti_c() {
+                    insts.push(Inst::Bti {
+                        targets: BranchTargetType::C,
+                    });
+                }
                 insts.push(Inst::Paci { key });
                 if flags.unwind_info() {
                     insts.push(Inst::Unwind {

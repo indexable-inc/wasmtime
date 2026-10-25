@@ -167,8 +167,10 @@ pub fn inst_store_data(func: &Function, inst: Inst) -> Option<Value> {
 
 /// Visit all successors of a block with a given visitor closure. The closure
 /// arguments are the branch instruction that is used to reach the successor,
-/// the successor block itself, and a flag indicating whether the block is
-/// branched to via a table entry.
+/// the successor block itself, and a flag indicating whether the block may be
+/// entered by an indirect branch (a jump-table entry, including the default, or
+/// an exception handler), i.e. whether it needs a landing pad under
+/// forward-edge CFI.
 pub(crate) fn visit_block_succs<F: FnMut(Inst, Block, bool)>(
     f: &Function,
     block: Block,
@@ -194,17 +196,16 @@ pub(crate) fn visit_block_succs<F: FnMut(Inst, Block, bool)>(
                 let pool = &f.dfg.value_lists;
                 let table = &f.stencil.dfg.jump_tables[*table];
 
-                // The default block is reached via a direct conditional branch,
-                // so it is not part of the table. We visit the default block
-                // first explicitly, to mirror the traversal order of
-                // `JumpTableData::all_branches`, and transitively the order of
+                // We visit the default block first explicitly, to mirror the
+                // traversal order of `JumpTableData::all_branches`, and
+                // transitively the order of
                 // `InstructionData::branch_destination`.
                 //
-                // Additionally, this case is why we are unable to replace this
-                // whole function with a loop over `branch_destination`: we need
-                // to report which branch targets come from the table vs the
-                // default.
-                visit(inst, table.default_block().block(pool), false);
+                // The default is reported as an indirect-branch target too:
+                // backends may reach it through the table (aarch64 clamps the
+                // index and stores the default as the last table entry), so
+                // under BTI it needs a landing pad like the table entries.
+                visit(inst, table.default_block().block(pool), true);
 
                 for dest in table.as_slice() {
                     visit(inst, dest.block(pool), true);
@@ -216,9 +217,15 @@ pub(crate) fn visit_block_succs<F: FnMut(Inst, Block, bool)>(
                 let pool = &f.dfg.value_lists;
                 let exdata = &f.stencil.dfg.exception_tables[*exception];
 
-                for dest in exdata.all_branches() {
-                    visit(inst, dest.block(pool), false);
+                // Handlers come first and the normal return last. The
+                // unwinder enters a handler with an indirect branch, so
+                // handlers are indirect-branch targets (a `bti j` under BTI);
+                // the normal return is reached directly.
+                let (normal, handlers) = exdata.all_branches().split_last().unwrap();
+                for dest in handlers {
+                    visit(inst, dest.block(pool), true);
                 }
+                visit(inst, normal.block(pool), false);
             }
 
             inst => debug_assert!(!inst.opcode().is_branch()),

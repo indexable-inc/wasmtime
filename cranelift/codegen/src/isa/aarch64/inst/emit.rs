@@ -3141,8 +3141,23 @@ impl MachInstEmit for Inst {
             &Inst::ReturnCallInd { ref info } => {
                 emit_return_call_common_sequence(sink, emit_info, state, info);
 
+                // Under BTI the callee starts with `bti c` (or `paciasp`/
+                // `pacibsp`), which accepts a `br` only through x16 or x17,
+                // so move the target (fixed to x1) into x16 first. x16 is
+                // the spill temp and is free once the frame is torn down.
+                let rn = if emit_info.isa_flags.use_bti() {
+                    Inst::Mov {
+                        size: OperandSize::Size64,
+                        rd: writable_spilltmp_reg(),
+                        rm: info.dest,
+                    }
+                    .emit(sink, emit_info, state);
+                    spilltmp_reg()
+                } else {
+                    info.dest
+                };
                 Inst::IndirectBr {
-                    rn: info.dest,
+                    rn,
                     targets: vec![],
                 }
                 .emit(sink, emit_info, state);
