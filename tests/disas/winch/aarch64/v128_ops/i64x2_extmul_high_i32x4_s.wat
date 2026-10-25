@@ -27,7 +27,7 @@
 ;;       ldr     q1, #0x80
 ;;       smull2  v1.2d, v1.4s, v0.4s
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x40]
+;;       ldur    x1, [x9, #0x48]
 ;;       add     x1, x1, w0, uxtw
 ;;       stur    q1, [x1]
 ;;       add     x28, x28, #0x10

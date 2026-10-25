@@ -176,12 +176,12 @@
 ;; wasm[1]::function[3]:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x50(%rdi), %rcx
-;;       movq    0xf0(%rcx), %rax
+;;       movq    0x58(%rdi), %rcx
+;;       movq    0xf8(%rcx), %rax
 ;;       movl    (%rax), %edx
 ;;       testl   %edx, %edx
 ;;       je      0x16d
-;;  119: movq    0x50(%rcx), %rcx
+;;  119: movq    0x58(%rcx), %rcx
 ;;       movq    8(%rcx), %rcx
 ;;       movq    0x68(%rcx), %rcx
 ;;       movq    8(%rcx), %rdx

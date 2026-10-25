@@ -24,7 +24,7 @@
 ;;       cmpl    $0, %ecx
 ;;       jne     0x66
 ;;   48: movl    $0, %ecx
-;;       movq    0x38(%r14), %r11
+;;       movq    0x40(%r14), %r11
 ;;       movq    (%r11), %rdx
 ;;       movl    %ecx, %ecx
 ;;       addq    %rcx, %rdx

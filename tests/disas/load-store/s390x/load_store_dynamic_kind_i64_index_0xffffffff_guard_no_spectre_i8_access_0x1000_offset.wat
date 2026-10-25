@@ -27,10 +27,10 @@
 ;;       lgr     %r1, %r15
 ;;       aghi    %r15, -0xa0
 ;;       stg     %r1, 0(%r15)
-;;       lg      %r6, 0x48(%r2)
+;;       lg      %r6, 0x50(%r2)
 ;;       clgr    %r4, %r6
 ;;       jgh     0x34
-;;       ag      %r4, 0x40(%r2)
+;;       ag      %r4, 0x48(%r2)
 ;;       lghi    %r2, 0x1000
 ;;       stc     %r5, 0(%r2, %r4)
 ;;       lmg     %r14, %r15, 0x110(%r15)
@@ -45,10 +45,10 @@
 ;;       lgr     %r1, %r15
 ;;       aghi    %r15, -0xa0
 ;;       stg     %r1, 0(%r15)
-;;       lg      %r6, 0x48(%r2)
+;;       lg      %r6, 0x50(%r2)
 ;;       clgr    %r4, %r6
 ;;       jgh     0x84
-;;       ag      %r4, 0x40(%r2)
+;;       ag      %r4, 0x48(%r2)
 ;;       lghi    %r2, 0x1000
 ;;       llc     %r2, 0(%r2, %r4)
 ;;       lmg     %r14, %r15, 0x110(%r15)

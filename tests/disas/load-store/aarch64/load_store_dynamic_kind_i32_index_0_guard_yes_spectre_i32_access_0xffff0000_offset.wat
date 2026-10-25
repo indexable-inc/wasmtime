@@ -25,8 +25,8 @@
 ;;       mov     w14, #-0xfffc
 ;;       adds    x13, x13, x14
 ;;       b.hs    #0x44
-;;   18: ldr     x14, [x2, #0x48]
-;;       ldr     x0, [x2, #0x40]
+;;   18: ldr     x14, [x2, #0x50]
+;;       ldr     x0, [x2, #0x48]
 ;;       mov     x15, #0
 ;;       add     x0, x0, w4, uxtw
 ;;       mov     x1, #0xffff0000
@@ -45,8 +45,8 @@
 ;;       mov     w14, #-0xfffc
 ;;       adds    x13, x13, x14
 ;;       b.hs    #0xa4
-;;   78: ldr     x14, [x2, #0x48]
-;;       ldr     x0, [x2, #0x40]
+;;   78: ldr     x14, [x2, #0x50]
+;;       ldr     x0, [x2, #0x48]
 ;;       mov     x15, #0
 ;;       add     x0, x0, w4, uxtw
 ;;       mov     x1, #0xffff0000

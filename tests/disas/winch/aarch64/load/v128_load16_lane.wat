@@ -26,7 +26,7 @@
 ;;       stur    x1, [x28]
 ;;       ldr     q0, #0x80
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x40]
+;;       ldur    x1, [x9, #0x48]
 ;;       add     x1, x1, w0, uxtw
 ;;       ldurh   w16, [x1]
 ;;       mov     v0.h[1], w16

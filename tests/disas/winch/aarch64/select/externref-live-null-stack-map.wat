@@ -57,8 +57,8 @@
 ;;       mov     sp, x28
 ;;       stur    x0, [x28, #8]
 ;;       stur    x1, [x28]
-;;       ldur    x3, [x9, #0x50]
-;;       ldur    x2, [x9, #0x40]
+;;       ldur    x3, [x9, #0x58]
+;;       ldur    x2, [x9, #0x48]
 ;;       mov     x0, x3
 ;;       mov     x1, x9
 ;;       blr     x2

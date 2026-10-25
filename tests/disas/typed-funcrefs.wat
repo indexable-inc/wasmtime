@@ -144,7 +144,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0048                               v11 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0048                               v11 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;;                                     v62 = iconst.i64 8
 ;; @0048                               v14 = iadd v11, v62  ; v62 = 8
 ;; @0048                               v17 = load.i64 user6 aligned region3 v14
@@ -202,7 +202,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0075                               v11 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0075                               v11 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;;                                     v62 = iconst.i64 8
 ;; @0075                               v14 = iadd v11, v62  ; v62 = 8
 ;; @0075                               v17 = load.i64 user6 aligned region3 v14

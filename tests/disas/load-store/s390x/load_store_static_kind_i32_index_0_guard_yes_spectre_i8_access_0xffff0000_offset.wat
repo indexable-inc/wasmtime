@@ -30,7 +30,7 @@
 ;;       llgfr   %r3, %r4
 ;;       lghi    %r4, 0
 ;;       lgr     %r6, %r3
-;;       ag      %r6, 0x40(%r2)
+;;       ag      %r6, 0x48(%r2)
 ;;       llilh   %r2, 0xffff
 ;;       agrk    %r2, %r6, %r2
 ;;       clgfi   %r3, 0xffff
@@ -51,7 +51,7 @@
 ;;       llgfr   %r3, %r4
 ;;       lghi    %r4, 0
 ;;       lgr     %r5, %r3
-;;       ag      %r5, 0x40(%r2)
+;;       ag      %r5, 0x48(%r2)
 ;;       llilh   %r2, 0xffff
 ;;       agrk    %r2, %r5, %r2
 ;;       clgfi   %r3, 0xffff

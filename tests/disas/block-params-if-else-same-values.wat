@@ -35,14 +35,14 @@
 ;; @0033                               brif v2, block2, block4
 ;;
 ;;                                 block2:
-;; @0035                               v5 = load.i64 notrap aligned readonly can_move region2 v0+80
-;; @0035                               v6 = load.i64 notrap aligned readonly can_move region3 v0+64
+;; @0035                               v5 = load.i64 notrap aligned readonly can_move region2 v0+88
+;; @0035                               v6 = load.i64 notrap aligned readonly can_move region3 v0+72
 ;; @0035                               call_indirect sig0, v6(v5, v0)
 ;; @003b                               jump block3
 ;;
 ;;                                 block4:
-;; @003c                               v7 = load.i64 notrap aligned readonly can_move region2 v0+112
-;; @003c                               v8 = load.i64 notrap aligned readonly can_move region3 v0+96
+;; @003c                               v7 = load.i64 notrap aligned readonly can_move region2 v0+120
+;; @003c                               v8 = load.i64 notrap aligned readonly can_move region3 v0+104
 ;; @003c                               call_indirect sig0, v8(v7, v0)
 ;; @0042                               jump block3
 ;;

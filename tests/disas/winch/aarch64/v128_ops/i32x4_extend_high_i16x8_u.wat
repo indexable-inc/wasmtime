@@ -26,7 +26,7 @@
 ;;       ldr     q0, #0x80
 ;;       ushll2  v0.4s, v0.8h, #0
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x40]
+;;       ldur    x1, [x9, #0x48]
 ;;       add     x1, x1, w0, uxtw
 ;;       stur    q0, [x1]
 ;;       add     x28, x28, #0x10

@@ -103,8 +103,8 @@
 ;;                                     jump block6
 ;;
 ;;                                 block6:
-;; @0123                               v3 = load.i64 notrap aligned readonly can_move region2 v0+80
-;;                                     v9 = load.i64 notrap aligned readonly can_move region3 v3+240
+;; @0123                               v3 = load.i64 notrap aligned readonly can_move region2 v0+88
+;;                                     v9 = load.i64 notrap aligned readonly can_move region3 v3+248
 ;;                                     v10 = load.i32 notrap aligned region4 v9
 ;;                                     trapz v10, user26
 ;;                                     jump block9
@@ -125,12 +125,12 @@
 ;;                                     store notrap aligned region12 v19, v14+20
 ;;                                     store notrap aligned region11 v8, v15+132  ; v8 = 0
 ;;                                     store notrap aligned region5 v14, v15+136
-;;                                     v21 = load.i64 notrap aligned readonly can_move region3 v3+216
+;;                                     v21 = load.i64 notrap aligned readonly can_move region3 v3+224
 ;;                                     v22 = load.i32 notrap aligned region13 v21
 ;;                                     jump block16
 ;;
 ;;                                 block16:
-;;                                     v26 = load.i64 notrap aligned readonly can_move region2 v3+80
+;;                                     v26 = load.i64 notrap aligned readonly can_move region2 v3+88
 ;;                                     v28 = load.i64 notrap aligned readonly can_move region0 v26+8
 ;;                                     v29 = load.i32 notrap aligned region9 v28+128
 ;;                                     jump block17

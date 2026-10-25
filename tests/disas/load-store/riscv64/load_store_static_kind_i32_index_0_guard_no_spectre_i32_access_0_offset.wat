@@ -30,7 +30,7 @@
 ;;       slli    a2, a2, 2
 ;;       bgeu    a2, a1, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a2, 0x40(a0)
+;;       ld      a2, 0x48(a0)
 ;;       add     a1, a2, a1
 ;;       sw      a3, 0(a1)
 ;;       ld      ra, 8(sp)
@@ -50,7 +50,7 @@
 ;;       slli    a2, a2, 2
 ;;       bgeu    a2, a1, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a2, 0x40(a0)
+;;       ld      a2, 0x48(a0)
 ;;       add     a1, a2, a1
 ;;       lw      a0, 0(a1)
 ;;       ld      ra, 8(sp)

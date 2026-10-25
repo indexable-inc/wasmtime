@@ -63,8 +63,8 @@
 ;;       movl    $0x2a, 0x10(%rsi)
 ;;       ╰─╼ trap: GcHeapCorrupt
 ;;       movq    8(%rsp), %r9
-;;       movq    0x40(%r9), %rax
-;;       movq    0x50(%r9), %rdi
+;;       movq    0x48(%r9), %rax
+;;       movq    0x58(%r9), %rdi
 ;;       movq    8(%rsp), %rsi
 ;;       callq   *%rax
 ;;       ├─╼ exception frame offset: SP = FP - 0x40

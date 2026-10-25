@@ -24,7 +24,7 @@
 ;;       mov     w10, w4
 ;;       mov     w11, #-0x1001
 ;;       mov     x12, #0
-;;       ldr     x13, [x2, #0x40]
+;;       ldr     x13, [x2, #0x48]
 ;;       add     x13, x13, w4, uxtw
 ;;       add     x13, x13, #1, lsl #12
 ;;       cmp     x10, x11
@@ -39,7 +39,7 @@
 ;;       mov     w10, w4
 ;;       mov     w11, #-0x1001
 ;;       mov     x12, #0
-;;       ldr     x13, [x2, #0x40]
+;;       ldr     x13, [x2, #0x48]
 ;;       add     x13, x13, w4, uxtw
 ;;       add     x13, x13, #1, lsl #12
 ;;       cmp     x10, x11

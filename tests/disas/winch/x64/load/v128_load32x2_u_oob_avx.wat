@@ -22,7 +22,7 @@
 ;;       movl    $0xfff9, %eax
 ;;       cmpq    $0xfff8, %rax
 ;;       ja      0x68
-;;   40: movq    0x40(%r14), %rcx
+;;   40: movq    0x48(%r14), %rcx
 ;;       movl    %eax, %eax
 ;;       addq    %rax, %rcx
 ;;       movl    $0, %edx

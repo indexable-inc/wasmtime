@@ -21,7 +21,7 @@
 ;; wasm[0]::function[0]:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x40(%rdi), %rsi
+;;       movq    0x48(%rdi), %rsi
 ;;       movl    %edx, %edi
 ;;       movl    %ecx, (%rsi, %rdi)
 ;;       movq    %rbp, %rsp
@@ -31,7 +31,7 @@
 ;; wasm[0]::function[1]:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x40(%rdi), %rsi
+;;       movq    0x48(%rdi), %rsi
 ;;       movl    %edx, %edi
 ;;       movl    (%rsi, %rdi), %eax
 ;;       movq    %rbp, %rsp

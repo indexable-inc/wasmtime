@@ -57,12 +57,12 @@
 ;; @0049                               v5 = select v4, v2, v3
 ;;                                     v12 = stack_addr.i64 ss0
 ;;                                     store notrap aligned region4 v5, v12
-;; @004c                               v7 = load.i64 notrap aligned readonly can_move region3 v0+96
-;; @004c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+112
+;; @004c                               v7 = load.i64 notrap aligned readonly can_move region3 v0+104
+;; @004c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+120
 ;; @004c                               call_indirect sig0, v7(v6, v0), stack_map=[i32 @ ss0+0]
 ;;                                     v11 = load.i32 notrap aligned region4 v12
-;; @004e                               v9 = load.i64 notrap aligned readonly can_move region3 v0+64
-;; @004e                               v8 = load.i64 notrap aligned readonly can_move region2 v0+80
+;; @004e                               v9 = load.i64 notrap aligned readonly can_move region3 v0+72
+;; @004e                               v8 = load.i64 notrap aligned readonly can_move region2 v0+88
 ;; @004e                               call_indirect sig1, v9(v8, v0, v11)
 ;; @0050                               jump block1
 ;;
@@ -83,11 +83,11 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32):
-;; @005c                               v7 = load.i64 notrap aligned readonly can_move region3 v0+96
-;; @005c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+112
+;; @005c                               v7 = load.i64 notrap aligned readonly can_move region3 v0+104
+;; @005c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+120
 ;; @005c                               call_indirect sig0, v7(v6, v0)
-;; @005e                               v9 = load.i64 notrap aligned readonly can_move region3 v0+64
-;; @005e                               v8 = load.i64 notrap aligned readonly can_move region2 v0+80
+;; @005e                               v9 = load.i64 notrap aligned readonly can_move region3 v0+72
+;; @005e                               v8 = load.i64 notrap aligned readonly can_move region2 v0+88
 ;; @0059                               v5 = select v4, v2, v3
 ;; @005e                               call_indirect sig1, v9(v8, v0, v5)
 ;; @0060                               jump block1

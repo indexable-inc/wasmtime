@@ -10,7 +10,7 @@
 ;; function u0:0(i64 vmctx, i64, i32) -> i32 tail {
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 90 ""
+;;     region2 = 240 ""
 ;;     region3 = 215 ""
 ;;     region4 = 105 ""
 ;;     region5 = 171 ""
@@ -24,7 +24,7 @@
 ;; @0022                               v4 = iconst.i64 0x0001_fffc
 ;; @0022                               v5 = icmp ugt v3, v4  ; v4 = 0x0001_fffc
 ;; @0022                               v9 = iconst.i64 0
-;; @0022                               v6 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0022                               v6 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0022                               v7 = load.i64 notrap aligned readonly can_move region3 v6
 ;; @0022                               v8 = iadd v7, v3
 ;; @0022                               v10 = select_spectre_guard v5, v9, v8  ; v9 = 0

@@ -31,10 +31,10 @@
 ;;       add     a5, a1, a2
 ;;       bgeu    a5, a1, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a2, 0x48(a0)
+;;       ld      a2, 0x50(a0)
 ;;       bgeu    a2, a5, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       add     a0, a0, a1
 ;;       lui     a1, 0xffff
 ;;       slli    a1, a1, 4
@@ -58,10 +58,10 @@
 ;;       add     a5, a1, a2
 ;;       bgeu    a5, a1, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a2, 0x48(a0)
+;;       ld      a2, 0x50(a0)
 ;;       bgeu    a2, a5, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       add     a0, a0, a1
 ;;       lui     a1, 0xffff
 ;;       slli    a1, a1, 4

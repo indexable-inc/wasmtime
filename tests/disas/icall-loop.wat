@@ -44,7 +44,7 @@
 ;; @002b                               v4 = iconst.i32 2
 ;; @002b                               v5 = icmp uge v2, v4  ; v4 = 2
 ;; @002b                               v11 = iconst.i64 0
-;; @002b                               v7 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @002b                               v7 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @002b                               v6 = uextend.i64 v2
 ;; @002b                               v8 = iconst.i64 3
 ;; @002b                               v9 = ishl v6, v8  ; v8 = 3
@@ -96,7 +96,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0038                               v6 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0038                               v6 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;;                                     v34 = iconst.i64 8
 ;; @0038                               v9 = iadd v6, v34  ; v34 = 8
 ;; @0038                               v13 = iconst.i64 -2

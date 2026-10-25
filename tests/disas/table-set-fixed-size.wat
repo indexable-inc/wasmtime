@@ -31,7 +31,7 @@
 ;; @0056                               v4 = iconst.i32 7
 ;; @0056                               v5 = icmp uge v3, v4  ; v3 = 0, v4 = 7
 ;; @0056                               v6 = uextend.i64 v3  ; v3 = 0
-;; @0056                               v7 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0056                               v7 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0056                               v8 = iconst.i64 2
 ;; @0056                               v9 = ishl v6, v8  ; v8 = 2
 ;; @0056                               v10 = iadd v7, v9
@@ -58,7 +58,7 @@
 ;; @005f                               v4 = iconst.i32 7
 ;; @005f                               v5 = icmp uge v2, v4  ; v4 = 7
 ;; @005f                               v6 = uextend.i64 v2
-;; @005f                               v7 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @005f                               v7 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @005f                               v8 = iconst.i64 2
 ;; @005f                               v9 = ishl v6, v8  ; v8 = 2
 ;; @005f                               v10 = iadd v7, v9

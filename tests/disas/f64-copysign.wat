@@ -30,7 +30,7 @@
 ;; wasm[0]::function[0]:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x40(%rdi), %rax
+;;       movq    0x48(%rdi), %rax
 ;;       vmovsd  0xfff3(%rax), %xmm0
 ;;       vxorpd  %xmm1, %xmm1, %xmm1
 ;;       movabsq $9223372036854775808, %r8

@@ -19,7 +19,7 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
 ;; @002e                               v3 = uextend.i64 v2
-;; @002e                               v4 = load.i64 notrap aligned readonly can_move region2 v0+64
+;; @002e                               v4 = load.i64 notrap aligned readonly can_move region2 v0+72
 ;; @002e                               v5 = iadd v4, v3
 ;; @002e                               v6 = load.f32 little region4 v5
 ;; @0031                               jump block1

@@ -33,8 +33,8 @@
 ;;       stur    x0, [x28, #0x10]
 ;;       stur    x1, [x28, #8]
 ;;       stur    w2, [x28, #4]
-;;       ldur    x4, [x9, #0x50]
-;;       ldur    x3, [x9, #0x40]
+;;       ldur    x4, [x9, #0x58]
+;;       ldur    x3, [x9, #0x48]
 ;;       ldur    w16, [x28, #4]
 ;;       sub     x28, x28, #4
 ;;       mov     sp, x28

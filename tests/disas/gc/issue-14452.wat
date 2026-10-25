@@ -113,8 +113,8 @@
 ;; @005a                               jump block9
 ;;
 ;;                                 block9:
-;; @0061                               v78 = load.i64 notrap aligned readonly can_move region15 v0+64
-;; @0061                               v77 = load.i64 notrap aligned readonly can_move region14 v0+80
+;; @0061                               v78 = load.i64 notrap aligned readonly can_move region15 v0+72
+;; @0061                               v77 = load.i64 notrap aligned readonly can_move region14 v0+88
 ;; @0061                               try_call_indirect v78(v77, v0), sig3, block18, [ context v0, tag0: block19(exn0) ], stack_map=[i32 @ ss0+0]
 ;;
 ;;                                 block19(v84: i64):

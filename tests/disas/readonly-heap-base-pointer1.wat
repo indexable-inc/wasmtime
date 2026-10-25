@@ -23,7 +23,7 @@
 ;; @0020                               v4 = iconst.i64 0x0001_fffc
 ;; @0020                               v5 = icmp ugt v3, v4  ; v4 = 0x0001_fffc
 ;; @0020                               v8 = iconst.i64 0
-;; @0020                               v6 = load.i64 notrap aligned readonly can_move region2 v0+64
+;; @0020                               v6 = load.i64 notrap aligned readonly can_move region2 v0+72
 ;; @0020                               v7 = iadd v6, v3
 ;; @0020                               v9 = select_spectre_guard v5, v8, v7  ; v8 = 0
 ;; @0020                               v10 = load.i32 little region4 v9

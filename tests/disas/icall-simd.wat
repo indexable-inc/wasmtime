@@ -30,7 +30,7 @@
 ;; @0033                               v4 = iconst.i32 23
 ;; @0033                               v5 = icmp uge v2, v4  ; v4 = 23
 ;; @0033                               v6 = uextend.i64 v2
-;; @0033                               v7 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0033                               v7 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0033                               v8 = iconst.i64 3
 ;; @0033                               v9 = ishl v6, v8  ; v8 = 3
 ;; @0033                               v10 = iadd v7, v9

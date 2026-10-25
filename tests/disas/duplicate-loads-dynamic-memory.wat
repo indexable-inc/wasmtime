@@ -34,8 +34,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;; @0057                               v4 = load.i64 notrap aligned region3 v0+72
-;; @0057                               v6 = load.i64 notrap aligned can_move region2 v0+64
+;; @0057                               v4 = load.i64 notrap aligned region3 v0+80
+;; @0057                               v6 = load.i64 notrap aligned can_move region2 v0+72
 ;; @0057                               v3 = uextend.i64 v2
 ;; @0057                               v5 = icmp ugt v3, v4
 ;; @0057                               v8 = iconst.i64 0
@@ -60,8 +60,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;; @0064                               v4 = load.i64 notrap aligned region3 v0+72
-;; @0064                               v6 = load.i64 notrap aligned can_move region2 v0+64
+;; @0064                               v4 = load.i64 notrap aligned region3 v0+80
+;; @0064                               v6 = load.i64 notrap aligned can_move region2 v0+72
 ;; @0064                               v3 = uextend.i64 v2
 ;; @0064                               v5 = icmp ugt v3, v4
 ;; @0064                               v10 = iconst.i64 0

@@ -33,9 +33,9 @@
 ;; @0040                               v4 = uextend.i64 v2
 ;; @0040                               v5 = iconst.i64 0xffff_0004
 ;; @0040                               v6 = uadd_overflow_trap v4, v5, heap_oob  ; v5 = 0xffff_0004
-;; @0040                               v7 = load.i64 notrap aligned region3 v0+72
+;; @0040                               v7 = load.i64 notrap aligned region3 v0+80
 ;; @0040                               v8 = icmp ugt v6, v7
-;; @0040                               v9 = load.i64 notrap aligned can_move region2 v0+64
+;; @0040                               v9 = load.i64 notrap aligned can_move region2 v0+72
 ;; @0040                               v10 = iadd v9, v4
 ;; @0040                               v11 = iconst.i64 0xffff_0000
 ;; @0040                               v12 = iadd v10, v11  ; v11 = 0xffff_0000
@@ -63,9 +63,9 @@
 ;; @004c                               v3 = uextend.i64 v2
 ;; @004c                               v4 = iconst.i64 0xffff_0004
 ;; @004c                               v5 = uadd_overflow_trap v3, v4, heap_oob  ; v4 = 0xffff_0004
-;; @004c                               v6 = load.i64 notrap aligned region3 v0+72
+;; @004c                               v6 = load.i64 notrap aligned region3 v0+80
 ;; @004c                               v7 = icmp ugt v5, v6
-;; @004c                               v8 = load.i64 notrap aligned can_move region2 v0+64
+;; @004c                               v8 = load.i64 notrap aligned can_move region2 v0+72
 ;; @004c                               v9 = iadd v8, v3
 ;; @004c                               v10 = iconst.i64 0xffff_0000
 ;; @004c                               v11 = iadd v9, v10  ; v10 = 0xffff_0000

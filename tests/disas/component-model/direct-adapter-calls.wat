@@ -86,7 +86,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @00ee                               v3 = load.i64 notrap aligned readonly can_move region2 v0+80
+;; @00ee                               v3 = load.i64 notrap aligned readonly can_move region2 v0+88
 ;; @00eb                               v2 = iconst.i32 1234
 ;; @00ee                               v4 = call fn0(v3, v0, v2)  ; v2 = 1234
 ;; @00f0                               jump block1
@@ -117,15 +117,15 @@
 ;; @008d                               jump block3
 ;;
 ;;                                 block4:
-;; @0094                               v6 = load.i64 notrap aligned readonly can_move region2 v0+176
+;; @0094                               v6 = load.i64 notrap aligned readonly can_move region2 v0+184
 ;; @0094                               v7 = load.i32 notrap aligned region3 v6
 ;; @0098                               trapz v7, user26
 ;; @0098                               jump block7
 ;;
 ;;                                 block7:
-;; @009e                               v9 = load.i64 notrap aligned readonly can_move region2 v0+152
+;; @009e                               v9 = load.i64 notrap aligned readonly can_move region2 v0+160
 ;; @009e                               v10 = load.i32 notrap aligned region5 v9
-;; @00ac                               v14 = load.i64 notrap aligned readonly can_move region4 v0+80
+;; @00ac                               v14 = load.i64 notrap aligned readonly can_move region4 v0+88
 ;; @00ac                               try_call fn0(v14, v0, v2), sig1, block9(ret0), [ context v0, default: block6(exn0) ]
 ;;
 ;;                                 block9(v15: i32):

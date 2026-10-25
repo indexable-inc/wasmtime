@@ -37,7 +37,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i64):
-;; @0043                               v4 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0043                               v4 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0043                               v5 = load.i64 notrap aligned region4 v4+8
 ;; @0043                               v10 = load.i64 notrap aligned region3 v4
 ;; @0043                               v16 = iconst.i64 1
@@ -51,8 +51,8 @@
 ;; @0043                               v13 = iadd v10, v12
 ;; @0043                               v15 = select_spectre_guard v7, v14, v13  ; v14 = 0
 ;; @0043                               store user6 aligned region5 v17, v15
-;; @0049                               v18 = load.i64 notrap aligned region4 v0+88
-;; @0049                               v22 = load.i64 notrap aligned region3 v0+80
+;; @0049                               v18 = load.i64 notrap aligned region4 v0+96
+;; @0049                               v22 = load.i64 notrap aligned region3 v0+88
 ;; @0049                               v19 = ireduce.i32 v18
 ;; @0049                               v20 = icmp uge v2, v19
 ;; @0049                               v25 = iadd v22, v12

@@ -42,26 +42,26 @@
 ;; }
 ;;
 ;; function u2415919104:0(i64 vmctx, i64) tail {
-;;     region0 = 174 ""
-;;     region1 = 10 ""
+;;     region0 = 106 ""
+;;     region1 = 35 ""
 ;;     region2 = 105 ""
 ;;     region3 = 215 ""
 ;;     sig0 = (i64 vmctx, i64, i64, i64) tail
 ;;     fn0 = colocated u805306368:1 sig0
 ;;
 ;; block0(v0: i64, v1: i64):
-;;     v2 = load.i64 notrap aligned region0 v0+112
+;;     v2 = load.i64 notrap aligned region0 v0+128
 ;;     v3 = iconst.i64 0
 ;;     v4 = icmp eq v2, v3  ; v3 = 0
 ;;     brif v4, block2, block1
 ;;
 ;; block1:
-;;     v6 = load.i32 notrap aligned region1 v0+120
-;;     v8 = load.i64 notrap aligned region2 v0+72
+;;     v6 = load.i32 notrap aligned region1 v0+136
+;;     v8 = load.i64 notrap aligned region2 v0+80
 ;;     v10 = uextend.i64 v6
 ;;     v14 = icmp ugt v10, v8
 ;;     trapnz v14, heap_oob
-;;     v15 = load.i64 notrap aligned readonly can_move region3 v0+64
+;;     v15 = load.i64 notrap aligned readonly can_move region3 v0+72
 ;;     call fn0(v0, v15, v2, v10)
 ;;     jump block2
 ;;

@@ -44,7 +44,7 @@
 ;;       cmpq    $-1, %rax
 ;;       je      0xfb
 ;;   8b: movq    %r14, %r11
-;;       movq    0x40(%r11), %rsi
+;;       movq    0x48(%r11), %rsi
 ;;       movl    %eax, %edi
 ;;       addl    %ecx, %edi
 ;;       jb      0x10a
@@ -55,12 +55,12 @@
 ;;   ae: movq    %rax, %rsi
 ;;       movq    %rdx, %rdi
 ;;       movq    %r14, %r8
-;;       movq    0x40(%r8), %r9
+;;       movq    0x48(%r8), %r9
 ;;       cmpq    %r9, %rsi
 ;;       jae     0x10e
 ;;   c4: movq    %rsi, %r11
 ;;       imulq   $8, %r11, %r11
-;;       movq    0x38(%r8), %r8
+;;       movq    0x40(%r8), %r8
 ;;       movq    %r8, %r10
 ;;       addq    %r11, %r8
 ;;       cmpq    %r9, %rsi

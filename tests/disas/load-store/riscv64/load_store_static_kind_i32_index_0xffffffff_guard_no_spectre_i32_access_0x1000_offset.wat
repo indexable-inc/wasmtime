@@ -23,7 +23,7 @@
 ;;       sd      ra, 8(sp)
 ;;       sd      s0, 0(sp)
 ;;       mv      s0, sp
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       slli    a1, a2, 0x20
 ;;       srli    a1, a1, 0x20
 ;;       add     a0, a0, a1
@@ -40,7 +40,7 @@
 ;;       sd      ra, 8(sp)
 ;;       sd      s0, 0(sp)
 ;;       mv      s0, sp
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       slli    a1, a2, 0x20
 ;;       srli    a1, a1, 0x20
 ;;       add     a0, a0, a1

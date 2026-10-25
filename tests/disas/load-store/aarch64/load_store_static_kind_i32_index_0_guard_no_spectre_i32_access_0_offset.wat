@@ -25,7 +25,7 @@
 ;;       mov     x7, #0xfffffffc
 ;;       cmp     x6, x7
 ;;       b.hi    #0x28
-;;   18: ldr     x8, [x2, #0x40]
+;;   18: ldr     x8, [x2, #0x48]
 ;;       str     w5, [x8, w4, uxtw]
 ;;       ldp     x29, x30, [sp], #0x10
 ;;       ret
@@ -38,7 +38,7 @@
 ;;       mov     x7, #0xfffffffc
 ;;       cmp     x6, x7
 ;;       b.hi    #0x68
-;;   58: ldr     x8, [x2, #0x40]
+;;   58: ldr     x8, [x2, #0x48]
 ;;       ldr     w2, [x8, w4, uxtw]
 ;;       ldp     x29, x30, [sp], #0x10
 ;;       ret

@@ -51,13 +51,13 @@
 ;;     region2 = 117 ""
 ;;
 ;; block0(v0: i64, v1: i64):
-;;     v4 = load.i64 notrap aligned region1 v0+64
+;;     v4 = load.i64 notrap aligned region1 v0+72
 ;;     v5 = ireduce.i32 v4
 ;;     v6 = uextend.i64 v5
 ;;     v78 = iconst.i64 4
 ;;     v84 = icmp ult v6, v78  ; v78 = 4
 ;;     trapnz v84, user6
-;;     v13 = load.i64 notrap aligned region0 v0+56
+;;     v13 = load.i64 notrap aligned region0 v0+64
 ;;     v95 = iconst.i32 21
 ;;     v2 = iconst.i32 1
 ;;     v106 = icmp ule v5, v2  ; v2 = 1

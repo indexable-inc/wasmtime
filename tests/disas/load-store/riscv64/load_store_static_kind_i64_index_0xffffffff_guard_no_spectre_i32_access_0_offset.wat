@@ -28,7 +28,7 @@
 ;;       slli    a1, a1, 2
 ;;       bgeu    a1, a2, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       add     a0, a0, a2
 ;;       sw      a3, 0(a0)
 ;;       ld      ra, 8(sp)
@@ -46,7 +46,7 @@
 ;;       slli    a1, a1, 2
 ;;       bgeu    a1, a2, 8
 ;;       .byte   0x00, 0x00, 0x00, 0x00
-;;       ld      a0, 0x40(a0)
+;;       ld      a0, 0x48(a0)
 ;;       add     a0, a0, a2
 ;;       lw      a0, 0(a0)
 ;;       ld      ra, 8(sp)
