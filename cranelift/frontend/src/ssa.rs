@@ -44,6 +44,11 @@ pub struct SSABuilder {
     /// definition the builder records, so it is linear in the work done.
     variables: FxHashMap<u64, Value>,
 
+    /// Variables with at least one entry in `variables`, so the check in
+    /// `mark_var_needs_stack_map` costs O(1) instead of a scan of the map.
+    #[cfg(debug_assertions)]
+    defined_vars: EntitySet<Variable>,
+
     /// Variables whose bindings must be tracked for stack maps.
     stack_map_vars: EntitySet<Variable>,
 
@@ -123,6 +128,8 @@ impl SSABuilder {
     /// deallocating memory.
     pub fn clear(&mut self) {
         self.variables.clear();
+        #[cfg(debug_assertions)]
+        self.defined_vars.clear();
         self.stack_map_vars.clear();
         self.stack_map_values.clear();
         self.ssa_blocks.clear();
@@ -142,6 +149,17 @@ impl SSABuilder {
             && self.calls.is_empty()
             && self.results.is_empty()
             && self.side_effects.is_empty()
+    }
+}
+
+impl SSABuilder {
+    /// Record `val` as the definition of `var` in `block`, returning the one
+    /// it replaces.
+    #[inline]
+    fn set_def(&mut self, var: Variable, block: Block, val: Value) -> Option<Value> {
+        #[cfg(debug_assertions)]
+        self.defined_vars.insert(var);
+        self.variables.insert(var_block_key(var, block), val)
     }
 }
 
@@ -228,17 +246,15 @@ impl SSABuilder {
     /// The SSA value is passed as an argument because it should be created with
     /// `ir::DataFlowGraph::append_result`.
     pub fn def_var(&mut self, var: Variable, val: Value, block: Block) {
-        self.variables.insert(var_block_key(var, block), val);
+        self.set_def(var, block, val);
         self.record_stack_map_binding(var, val);
     }
 
     /// Mark `var` as needing its bindings tracked for stack maps.
     pub fn mark_var_needs_stack_map(&mut self, var: Variable) {
-        debug_assert!(
-            !self
-                .variables
-                .keys()
-                .any(|k| (k >> 32) as usize == var.index()),
+        #[cfg(debug_assertions)]
+        assert!(
+            !self.defined_vars.contains(var),
             "declare_var_needs_stack_map({var:?}) must be called before any \
              definition of the variable; otherwise earlier definitions are \
              silently omitted from stack maps"
@@ -326,7 +342,7 @@ impl SSABuilder {
         // So in either case there is no definition in these blocks yet and we can blindly set one.
         debug_assert!(!self.stack_map_vars.contains(var) || self.stack_map_values.contains(val));
         while block != from {
-            let prev = self.variables.insert(var_block_key(var, block), val);
+            let prev = self.set_def(var, block, val);
             debug_assert!(prev.is_none());
             block = self.ssa_blocks[block].single_predecessor.unwrap();
         }
@@ -378,7 +394,7 @@ impl SSABuilder {
         // We've promised to return the most recent block where `var` was defined, but we didn't
         // find a usable definition. So create one.
         let val = func.dfg.append_block_param(block, ty);
-        self.variables.insert(var_block_key(var, block), val);
+        self.set_def(var, block, val);
         self.record_stack_map_binding(var, val);
 
         // Now every predecessor needs to pass its definition of this variable to the newly added
