@@ -77,3 +77,24 @@ fn smoke() {
     })
     .budget_ms(1_000);
 }
+
+/// A long run of [`check`] for the ix-cranelift-opt changes: `RA_FUZZ_MS`
+/// milliseconds (default 60 s) of random functions through ion and the
+/// checker. `cargo test --release -p regalloc2 --features fuzzing -- --ignored long`
+#[test]
+#[ignore]
+fn long() {
+    let ms = std::env::var("RA_FUZZ_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60_000);
+    let cases = core::cell::Cell::new(0u64);
+    arbtest::arbtest(|u| {
+        let test_case = TestCase::arbitrary(u)?;
+        check(test_case);
+        cases.set(cases.get() + 1);
+        Ok(())
+    })
+    .budget_ms(ms);
+    std::println!("ion checker: {} functions", cases.get());
+}

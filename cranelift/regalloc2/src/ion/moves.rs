@@ -786,31 +786,20 @@ impl<'a, F: Function> Env<'a, F> {
         // Redundant-move elimination state tracker.
         let mut redundant_moves = RedundantMoveEliminator::default();
 
-        fn redundant_move_process_side_effects<'a, F: Function>(
+        // The tracker's state at the end of each block that is the only
+        // predecessor of a later block, so that block starts from it
+        // instead of from nothing. Only blocks that need it are saved.
+        let mut block_exit_states: FxHashMap<Block, RedundantMoveEliminator> =
+            FxHashMap::default();
+
+        /// Apply the register and stack-slot writes of instructions
+        /// `insts` (defs, clobbers, scratch registers) to the tracker.
+        fn redundant_move_apply_insts<'a, F: Function>(
             this: &Env<'a, F>,
             redundant_moves: &mut RedundantMoveEliminator,
-            from: ProgPoint,
-            to: ProgPoint,
+            insts: core::ops::Range<usize>,
         ) {
-            // If we cross a block boundary, clear and return.
-            if this.cfginfo.insn_block[from.inst().index()]
-                != this.cfginfo.insn_block[to.inst().index()]
-            {
-                redundant_moves.clear();
-                return;
-            }
-
-            let start_inst = if from.pos() == InstPosition::Before {
-                from.inst()
-            } else {
-                from.inst().next()
-            };
-            let end_inst = if to.pos() == InstPosition::Before {
-                to.inst()
-            } else {
-                to.inst().next()
-            };
-            for inst in start_inst.index()..end_inst.index() {
+            for inst in insts {
                 let inst = Inst::new(inst);
                 for (i, op) in this.func.inst_operands(inst).iter().enumerate() {
                     match op.kind() {
@@ -834,6 +823,88 @@ impl<'a, F: Function> Env<'a, F> {
             }
         }
 
+        fn redundant_move_process_side_effects<'a, F: Function>(
+            this: &Env<'a, F>,
+            redundant_moves: &mut RedundantMoveEliminator,
+            block_exit_states: &mut FxHashMap<Block, RedundantMoveEliminator>,
+            from: ProgPoint,
+            to: ProgPoint,
+        ) {
+            let start_inst = if from.pos() == InstPosition::Before {
+                from.inst()
+            } else {
+                from.inst().next()
+            };
+            let end_inst = if to.pos() == InstPosition::Before {
+                to.inst()
+            } else {
+                to.inst().next()
+            };
+            let from_block = this.cfginfo.insn_block[from.inst().index()];
+            let to_block = this.cfginfo.insn_block[to.inst().index()];
+            if from_block == to_block {
+                redundant_move_apply_insts(
+                    this,
+                    redundant_moves,
+                    start_inst.index()..end_inst.index(),
+                );
+                return;
+            }
+
+            // Crossing into a later block. A block's state at entry is
+            // its predecessor's state at exit when it has exactly one
+            // predecessor, which ends earlier in instruction order:
+            // control reaches the block only from that exit (a
+            // terminator's own writes are applied like any other
+            // instruction's). Otherwise nothing is known at entry.
+            let save_exit = |this: &Env<'a, F>,
+                             block: Block,
+                             state: &RedundantMoveEliminator,
+                             saved: &mut FxHashMap<Block, RedundantMoveEliminator>| {
+                let needed = this.func.block_succs(block).iter().any(|&succ| {
+                    succ.index() > block.index() && this.func.block_preds(succ).len() == 1
+                });
+                if needed {
+                    saved.insert(block, state.clone());
+                }
+            };
+            let from_end = this.func.block_insns(from_block).last().next();
+            redundant_move_apply_insts(
+                this,
+                redundant_moves,
+                start_inst.index()..from_end.index(),
+            );
+            save_exit(this, from_block, redundant_moves, block_exit_states);
+            for b in (from_block.index() + 1)..=to_block.index() {
+                let block = Block::new(b);
+                let preds = this.func.block_preds(block);
+                match (preds.len(), preds.first()) {
+                    (1, Some(&pred)) if pred.index() < b => {
+                        match block_exit_states.get(&pred) {
+                            Some(state) => *redundant_moves = state.clone(),
+                            None => redundant_moves.clear(),
+                        }
+                    }
+                    _ => redundant_moves.clear(),
+                }
+                let range = this.func.block_insns(block);
+                if block == to_block {
+                    redundant_move_apply_insts(
+                        this,
+                        redundant_moves,
+                        range.first().index()..end_inst.index(),
+                    );
+                } else {
+                    redundant_move_apply_insts(
+                        this,
+                        redundant_moves,
+                        range.first().index()..range.last().next().index(),
+                    );
+                    save_exit(this, block, redundant_moves, block_exit_states);
+                }
+            }
+        }
+
         let mut last_pos = ProgPoint::before(Inst::new(0));
         let mut edits = Edits::with_capacity(self.func.num_insts());
 
@@ -845,7 +916,13 @@ impl<'a, F: Function> Env<'a, F> {
             }
             let moves = &inserted_moves.moves[start..i];
 
-            redundant_move_process_side_effects(self, &mut redundant_moves, last_pos, pos_prio.pos);
+            redundant_move_process_side_effects(
+                self,
+                &mut redundant_moves,
+                &mut block_exit_states,
+                last_pos,
+                pos_prio.pos,
+            );
             last_pos = pos_prio.pos;
 
             // Gather all the moves in each RegClass separately.
