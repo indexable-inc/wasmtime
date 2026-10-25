@@ -48,11 +48,14 @@
 ;;     region1 = 160 ""
 ;;     region2 = 215 ""
 ;;     region3 = 105 ""
+;;     region4 = 171 ""
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly can_move region0 gv0+8
 ;;     gv2 = load.i64 notrap aligned region1 gv1+24
 ;;     sig0 = (i64 vmctx, i64, i32, i64) tail
+;;     sig1 = (i64 vmctx, i64, i32, i64, i64, i64) -> i64 tail
 ;;     fn0 = colocated u805306368:2 sig0
+;;     fn1 = colocated u805306368:52 sig1
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
@@ -62,10 +65,40 @@
 ;; @003c                               v10 = iadd v6, v7
 ;; @003c                               v11 = icmp ugt v10, v5
 ;; @003c                               trapnz v11, heap_oob
+;;                                     v29 = iconst.i64 0
+;; @003c                               v21 = select_spectre_guard v11, v29, v7  ; v29 = 0
+;; @003c                               v22 = iconst.i64 0x0010_0000
+;; @003c                               v23 = icmp uge v21, v22  ; v22 = 0x0010_0000
+;; @003c                               brif v23, block4, block3
+;;
+;;                                 block3:
 ;; @003c                               v12 = load.i64 notrap aligned readonly can_move region2 v0+96
 ;; @003c                               v16 = iadd v12, v6
+;;                                     v32 = iconst.i64 0
+;;                                     v33 = select_spectre_guard v11, v32, v16  ; v32 = 0
 ;; @0038                               v4 = iconst.i32 0
-;; @003c                               call fn0(v0, v16, v4, v7)  ; v4 = 0
+;; @003c                               call fn0(v0, v33, v4, v21)  ; v4 = 0
+;; @003c                               jump block2
+;;
+;;                                 block4 cold:
+;;                                     v34 = iconst.i64 0
+;;                                     v35 = load.i64 notrap aligned readonly can_move region2 v0+96
+;;                                     v36 = iadd v35, v6
+;;                                     v37 = select_spectre_guard v11, v34, v36  ; v34 = 0
+;;                                     v38 = iconst.i32 0
+;; @003c                               v26 = iconst.i64 0x8000
+;; @003c                               jump block5(v34)  ; v34 = 0
+;;
+;;                                 block5(v24: i64) cold:
+;;                                     v39 = iconst.i64 0x8000
+;; @003c                               v27 = call fn1(v0, v37, v38, v21, v24, v39)  ; v38 = 0, v39 = 0x8000
+;; @003c                               v28 = icmp eq v27, v21
+;; @003c                               brif v28, block2, block6
+;;
+;;                                 block6 cold:
+;; @003c                               jump block5(v27)
+;;
+;;                                 block2:
 ;; @003f                               jump block1
 ;;
 ;;                                 block1:
@@ -160,11 +193,14 @@
 ;;     region1 = 160 ""
 ;;     region2 = 215 ""
 ;;     region3 = 105 ""
+;;     region4 = 129 ""
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly can_move region0 gv0+8
 ;;     gv2 = load.i64 notrap aligned region1 gv1+24
 ;;     sig0 = (i64 vmctx, i64, i32, i64) tail
+;;     sig1 = (i64 vmctx, i64, i32, i64, i64, i64) -> i64 tail
 ;;     fn0 = colocated u805306368:2 sig0
+;;     fn1 = colocated u805306368:52 sig1
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
@@ -174,10 +210,40 @@
 ;; @006c                               v10 = iadd v6, v7
 ;; @006c                               v11 = icmp ugt v10, v5
 ;; @006c                               trapnz v11, heap_oob
+;;                                     v29 = iconst.i64 0
+;; @006c                               v21 = select_spectre_guard v11, v29, v7  ; v29 = 0
+;; @006c                               v22 = iconst.i64 0x0010_0000
+;; @006c                               v23 = icmp uge v21, v22  ; v22 = 0x0010_0000
+;; @006c                               brif v23, block4, block3
+;;
+;;                                 block3:
 ;; @006c                               v12 = load.i64 notrap aligned readonly can_move region2 v0+160
 ;; @006c                               v16 = iadd v12, v6
+;;                                     v32 = iconst.i64 0
+;;                                     v33 = select_spectre_guard v11, v32, v16  ; v32 = 0
 ;; @0068                               v4 = iconst.i32 0
-;; @006c                               call fn0(v0, v16, v4, v7)  ; v4 = 0
+;; @006c                               call fn0(v0, v33, v4, v21)  ; v4 = 0
+;; @006c                               jump block2
+;;
+;;                                 block4 cold:
+;;                                     v34 = iconst.i64 0
+;;                                     v35 = load.i64 notrap aligned readonly can_move region2 v0+160
+;;                                     v36 = iadd v35, v6
+;;                                     v37 = select_spectre_guard v11, v34, v36  ; v34 = 0
+;;                                     v38 = iconst.i32 0
+;; @006c                               v26 = iconst.i64 0x8000
+;; @006c                               jump block5(v34)  ; v34 = 0
+;;
+;;                                 block5(v24: i64) cold:
+;;                                     v39 = iconst.i64 0x8000
+;; @006c                               v27 = call fn1(v0, v37, v38, v21, v24, v39)  ; v38 = 0, v39 = 0x8000
+;; @006c                               v28 = icmp eq v27, v21
+;; @006c                               brif v28, block2, block6
+;;
+;;                                 block6 cold:
+;; @006c                               jump block5(v27)
+;;
+;;                                 block2:
 ;; @006f                               jump block1
 ;;
 ;;                                 block1:

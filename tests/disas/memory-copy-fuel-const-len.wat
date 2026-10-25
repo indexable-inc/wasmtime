@@ -75,6 +75,7 @@
 ;;     region2 = 7 ""
 ;;     region3 = 215 ""
 ;;     region4 = 105 ""
+;;     region5 = 171 ""
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly can_move region0 gv0+8
 ;;     gv2 = load.i64 notrap aligned region1 gv1+24
@@ -94,29 +95,35 @@
 ;; @0030                               brif v8, block2, block3(v6)
 ;;
 ;;                                 block2:
-;;                                     v43 = iadd.i64 v4, v5  ; v5 = 1
-;; @0030                               store notrap aligned region2 v43, v3
+;;                                     v47 = iadd.i64 v4, v5  ; v5 = 1
+;; @0030                               store notrap aligned region2 v47, v3
 ;; @0030                               v10 = call fn0(v0)
 ;; @0030                               v12 = load.i64 notrap aligned region2 v3
 ;; @0030                               jump block3(v12)
 ;;
-;;                                 block3(v29: i64):
+;;                                 block3(v33: i64):
 ;; @0038                               v16 = load.i64 notrap aligned region4 v0+72
 ;; @0038                               v17 = uextend.i64 v2
-;;                                     v33 = iconst.i64 128
-;; @0038                               v21 = iadd v17, v33  ; v33 = 128
+;;                                     v37 = iconst.i64 128
+;; @0038                               v21 = iadd v17, v37  ; v37 = 128
 ;; @0038                               v22 = icmp ugt v21, v16
 ;; @0038                               trapnz v22, heap_oob
 ;; @0038                               v23 = load.i64 notrap aligned readonly can_move region3 v0+64
 ;; @0038                               v27 = iadd v23, v17
+;;                                     v48 = iconst.i64 0
+;;                                     v49 = select_spectre_guard v22, v48, v27  ; v48 = 0
 ;; @0033                               v14 = iconst.i32 0
-;; @0038                               call fn1(v0, v27, v14, v33)  ; v14 = 0, v33 = 128
+;;                                     v50 = select_spectre_guard v22, v48, v37  ; v48 = 0, v37 = 128
+;; @0038                               call fn1(v0, v49, v14, v50)  ; v14 = 0
+;; @0038                               jump block4
+;;
+;;                                 block4:
 ;; @003b                               jump block1
 ;;
 ;;                                 block1:
-;; @003b                               v30 = iconst.i64 132
-;; @003b                               v31 = iadd.i64 v29, v30  ; v30 = 132
-;; @003b                               store notrap aligned region2 v31, v3
+;; @003b                               v34 = iconst.i64 132
+;; @003b                               v35 = iadd.i64 v33, v34  ; v34 = 132
+;; @003b                               store notrap aligned region2 v35, v3
 ;; @003b                               return
 ;; }
 ;;
@@ -126,6 +133,7 @@
 ;;     region2 = 7 ""
 ;;     region3 = 215 ""
 ;;     region4 = 105 ""
+;;     region5 = 171 ""
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly can_move region0 gv0+8
 ;;     gv2 = load.i64 notrap aligned region1 gv1+24
@@ -145,40 +153,46 @@
 ;; @003d                               brif v8, block2, block3(v6)
 ;;
 ;;                                 block2:
-;;                                     v50 = iadd.i64 v4, v5  ; v5 = 1
-;; @003d                               store notrap aligned region2 v50, v3
+;;                                     v54 = iadd.i64 v4, v5  ; v5 = 1
+;; @003d                               store notrap aligned region2 v54, v3
 ;; @003d                               v10 = call fn0(v0)
 ;; @003d                               v12 = load.i64 notrap aligned region2 v3
 ;; @003d                               jump block3(v12)
 ;;
-;;                                 block3(v29: i64):
+;;                                 block3(v33: i64):
 ;; @0045                               v16 = load.i64 notrap aligned region4 v0+72
 ;; @0045                               v17 = uextend.i64 v2
-;;                                     v40 = iconst.i64 4096
-;; @0045                               v21 = iadd v17, v40  ; v40 = 4096
+;;                                     v44 = iconst.i64 4096
+;; @0045                               v21 = iadd v17, v44  ; v44 = 4096
 ;; @0045                               v22 = icmp ugt v21, v16
 ;; @0045                               trapnz v22, heap_oob
 ;; @0045                               v23 = load.i64 notrap aligned readonly can_move region3 v0+64
 ;; @0045                               v27 = iadd v23, v17
+;;                                     v55 = iconst.i64 0
+;;                                     v56 = select_spectre_guard v22, v55, v27  ; v55 = 0
 ;; @0040                               v14 = iconst.i32 0
-;; @0045                               call fn1(v0, v27, v14, v40)  ; v14 = 0, v40 = 4096
-;; @0045                               v30 = iconst.i64 4100
-;; @0045                               v31 = iadd v29, v30  ; v30 = 4100
-;;                                     v51 = iconst.i64 0
-;;                                     v52 = icmp sge v31, v51  ; v51 = 0
-;; @0045                               brif v52, block4, block5(v31)
+;;                                     v57 = select_spectre_guard v22, v55, v44  ; v55 = 0, v44 = 4096
+;; @0045                               call fn1(v0, v56, v14, v57)  ; v14 = 0
+;; @0045                               jump block4
 ;;
 ;;                                 block4:
-;;                                     v53 = iadd.i64 v29, v30  ; v30 = 4100
-;; @0045                               store notrap aligned region2 v53, v3
-;; @0045                               v35 = call fn0(v0)
-;; @0045                               v37 = load.i64 notrap aligned region2 v3
-;; @0045                               jump block5(v37)
+;; @0045                               v34 = iconst.i64 4100
+;; @0045                               v35 = iadd.i64 v33, v34  ; v34 = 4100
+;;                                     v58 = iconst.i64 0
+;;                                     v59 = icmp sge v35, v58  ; v58 = 0
+;; @0045                               brif v59, block5, block6(v35)
 ;;
-;;                                 block5(v39: i64):
+;;                                 block5:
+;;                                     v60 = iadd.i64 v33, v34  ; v34 = 4100
+;; @0045                               store notrap aligned region2 v60, v3
+;; @0045                               v39 = call fn0(v0)
+;; @0045                               v41 = load.i64 notrap aligned region2 v3
+;; @0045                               jump block6(v41)
+;;
+;;                                 block6(v43: i64):
 ;; @0048                               jump block1
 ;;
 ;;                                 block1:
-;; @0048                               store.i64 notrap aligned region2 v39, v3
+;; @0048                               store.i64 notrap aligned region2 v43, v3
 ;; @0048                               return
 ;; }
