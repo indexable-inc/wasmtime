@@ -54,6 +54,12 @@ fn ensure_no_fact(vcode: &VCode<Inst>, reg: Reg) -> PccResult<()> {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FactFlowState {
     cmp_flags: Option<(Fact, Fact)>,
+    /// `src -> dst` for each `movl src, dst` (register source) seen so far in
+    /// the block: `dst` holds `zext32(src)`. Vregs are SSA here, so the
+    /// relation stays true for the rest of the block. A 32-bit compare on
+    /// `src` reads `dst`'s fact (the uextend that defines a Wasm index
+    /// symbol), see `zext32_fact`.
+    zext32: crate::FxHashMap<Reg, Reg>,
 }
 
 pub(crate) fn check(
@@ -534,7 +540,13 @@ fn check_external(
     match inst {
         // Moves and loads.
         I::movq_rm(i) => check_mov(ctx, vcode, wg(&i.r64), src_of(&i.rm64), &mem, 64, 64),
-        I::movl_rm(i) => check_mov(ctx, vcode, wg(&i.r32), src_of(&i.rm32), &mem, 32, 32),
+        I::movl_rm(i) => {
+            let src = src_of(&i.rm32);
+            if let Src::Reg(src) = src {
+                state.zext32.insert(src, wg(&i.r32).to_reg());
+            }
+            check_mov(ctx, vcode, wg(&i.r32), src, &mem, 32, 32)
+        }
         I::movzbl_rm(i) => check_mov(ctx, vcode, wg(&i.r32), src_of(&i.rm8), &mem, 8, 32),
         I::movzbq_rm(i) => check_mov(ctx, vcode, wg(&i.r64), src_of(&i.rm8), &mem, 8, 64),
         I::movzwl_rm(i) => check_mov(ctx, vcode, wg(&i.r32), src_of(&i.rm16), &mem, 16, 32),
@@ -690,6 +702,20 @@ fn check_external(
             if let Src::Reg(lhs) = src_of(&i.rm64) {
                 if lhs == rg(&i.r64) {
                     let lhs = get_fact_or_default(vcode, lhs, 64);
+                    state.cmp_flags = Some((lhs, Fact::constant(64, 0)));
+                }
+            }
+            Ok(())
+        }
+        // `testl r, r` sets ZF from the low 32 bits and clears CF: for the
+        // unsigned conditions the checker uses (`a`, `ae`, `ne`, `e`) these
+        // are the flags of the 64-bit `zext32(r) - 0`. The egraph narrows
+        // `icmp ugt (uextend x), 0` to `icmp ne x, 0` on the i32, so this is
+        // how the zero-bound check of `offset=4294967295` lowers.
+        I::testl_mr(i) => {
+            if let Src::Reg(lhs) = src_of(&i.rm32) {
+                if lhs == rg(&i.r32) {
+                    let lhs = zext32_fact(vcode, state, lhs);
                     state.cmp_flags = Some((lhs, Fact::constant(64, 0)));
                 }
             }
@@ -918,6 +944,21 @@ fn check_xor_zero(
             check_constant(ctx, vcode, paired_out(dst), 64, 0)
         }
         _ => check_generic(ctx, vcode, inst_idx, inst),
+    }
+}
+
+/// The fact of `zext32(reg)` as a 64-bit value: the fact of a register that a
+/// `movl` earlier in the block filled with exactly that value, else `reg`'s
+/// own 64-bit range when it already fits in 32 bits, else any 32-bit value.
+fn zext32_fact(vcode: &VCode<Inst>, state: &FactFlowState, reg: Reg) -> Fact {
+    if let Some(&wide) = state.zext32.get(&reg) {
+        return get_fact_or_default(vcode, wide, 64);
+    }
+    match get_fact_or_default(vcode, reg, 64) {
+        f @ Fact::Range {
+            bit_width: 64, max, ..
+        } if max <= u64::from(u32::MAX) => f,
+        _ => Fact::max_range_for_width_extended(32, 64),
     }
 }
 
