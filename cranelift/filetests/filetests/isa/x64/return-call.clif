@@ -236,9 +236,9 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 ; block0:
 ;   movq %r8, %rax
 ;   movq %r9, %rsi
-;   movq <offset:0>+-0x20(%rbp), %r8
-;   movq <offset:0>+-0x18(%rbp), %r9
-;   movq <offset:0>+-0x10(%rbp), %r10
+;   movl <offset:0>+-0x20(%rbp), %r8d
+;   movl <offset:0>+-0x18(%rbp), %r9d
+;   movl <offset:0>+-0x10(%rbp), %r10d
 ;   movl %r10d, <offset:0>+-0x10(%rbp)
 ;   movq %rdx, %rdi
 ;   movq %rax, %rdx
@@ -254,9 +254,9 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 ; block1: ; offset 0x4
 ;   movq %r8, %rax
 ;   movq %r9, %rsi
-;   movq 0x10(%rbp), %r8
-;   movq 0x18(%rbp), %r9
-;   movq 0x20(%rbp), %r10
+;   movl 0x10(%rbp), %r8d
+;   movl 0x18(%rbp), %r9d
+;   movl 0x20(%rbp), %r10d
 ;   movl %r10d, 0x20(%rbp)
 ;   movq %rdx, %rdi
 ;   movq %rax, %rdx
@@ -281,7 +281,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block0:
-;   movq <offset:0>+-0x10(%rbp), %rdi
+;   movzbq <offset:0>+-0x10(%rbp), %rdi
 ;   return_call_known TestCase(%callee_i8) (0) tmp=%r11 %rdi=%rdi
 ;
 ; Disassembled:
@@ -289,13 +289,13 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32, v7: i32, v
 ;   pushq %rbp
 ;   movq %rsp, %rbp
 ; block1: ; offset 0x4
-;   movq 0x20(%rbp), %rdi
+;   movzbq 0x20(%rbp), %rdi
 ;   movq %rbp, %rsp
 ;   popq %rbp
 ;   movq (%rsp), %r11
 ;   movq %r11, 0x20(%rsp)
 ;   addq $0x20, %rsp
-;   jmp 0x1e ; reloc_external CallPCRel4 %callee_i8 -4
+;   jmp 0x1f ; reloc_external CallPCRel4 %callee_i8 -4
 
 ;;;; Test growing the argument area when it's non-empty ;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -317,7 +317,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32):
 ;   movq %r11, 8(%rsp)
 ; block0:
 ;   movq %r9, %rax
-;   movq <offset:0>+-0x10(%rbp), %r9
+;   movl <offset:0>+-0x10(%rbp), %r9d
 ;   movl %edi, <offset:0>+-0x20(%rbp)
 ;   movl %edi, <offset:0>+-0x18(%rbp)
 ;   movl %esi, <offset:0>+-0x10(%rbp)
@@ -340,7 +340,7 @@ block0(v0: i32, v1: i32, v2: i32, v3: i32, v4: i32, v5: i32, v6: i32):
 ;   movq %r11, 8(%rsp)
 ; block1: ; offset 0x1e
 ;   movq %r9, %rax
-;   movq 0x20(%rbp), %r9
+;   movl 0x20(%rbp), %r9d
 ;   movl %edi, 0x10(%rbp)
 ;   movl %edi, 0x18(%rbp)
 ;   movl %esi, 0x20(%rbp)

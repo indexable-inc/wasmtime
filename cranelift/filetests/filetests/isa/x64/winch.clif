@@ -405,9 +405,9 @@ block0(v0:i64):
 ;   leaq (%rsp), %rdi
 ;   movabsq $0, %r10 ; reloc_external Abs8 %g 0
 ;   callq *%r10
-;   movq 4(%rsp), %r11
+;   movl 4(%rsp), %r11d
 ;   movq %r11, 0x10(%rsp)
-;   movq (%rsp), %r11
+;   movl (%rsp), %r11d
 ;   movq %r11, 0x18(%rsp)
 ;   movq 0x10(%rsp), %rax
 ;   movq 0x18(%rsp), %rsi

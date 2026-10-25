@@ -414,10 +414,21 @@ impl ABIMachineSpec for X64ABIMachineSpec {
     }
 
     fn gen_load_stack(mem: StackAMode, into_reg: Writable<Reg>, ty: Type) -> Self::I {
-        // For integer-typed values, we always load a full 64 bits (and we always spill a full 64
-        // bits as well -- see `Inst::store()`).
+        // Read a narrow integer at its own width, zero-extended. Whoever
+        // wrote the slot stored at least that width (`gen_store_stack` and
+        // `gen_store_base_offset` store the value's width; spills store
+        // the full register), and a load must not be wider than the store
+        // it reads: the CPU cannot forward a narrow store into a wider
+        // load, so a 64-bit load of an `i32` stack argument waits for the
+        // caller's 32-bit store to commit (a store-to-load forwarding
+        // failure on every call). This also keeps the load inside the slot
+        // where the slot is narrower than 8 bytes (Winch packs return
+        // values). The upper bits of a narrow integer in a register are
+        // undefined, so zero-extending costs nothing.
         let ty = match ty {
-            types::I8 | types::I16 | types::I32 => types::I64,
+            types::I8 | types::I16 | types::I32 => {
+                return Inst::load(ty, mem, into_reg, ExtKind::ZeroExtend);
+            }
             // Stack slots are always at least 8 bytes, so it's fine to load 4 bytes instead of only
             // two.
             types::F16 | types::I8X2 => types::F32,

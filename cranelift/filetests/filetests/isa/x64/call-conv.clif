@@ -194,7 +194,7 @@ block0(
 ;   subq $0x90, %rsp
 ; block0:
 ;   movq <offset:0>+-0x20(%rbp), %r10
-;   movq <offset:0>+-0x18(%rbp), %rax
+;   movl <offset:0>+-0x18(%rbp), %eax
 ;   movss <offset:0>+-0x10(%rbp), %xmm8
 ;   movsd <offset:0>+-8(%rbp), %xmm9
 ;   movq %r8, 0x20(%rsp)
@@ -228,7 +228,7 @@ block0(
 ;   subq $0x90, %rsp
 ; block1: ; offset 0xb
 ;   movq 0x10(%rbp), %r10
-;   movq 0x18(%rbp), %rax
+;   movl 0x18(%rbp), %eax
 ;   movss 0x20(%rbp), %xmm8
 ;   movsd 0x28(%rbp), %xmm9
 ;   movq %r8, 0x20(%rsp)
