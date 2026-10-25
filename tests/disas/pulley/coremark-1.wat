@@ -86,10 +86,8 @@
 ;;       xmov x24, x6
 ;;       xadd32 x2, x2, x5
 ;;       xadd32_u8 x3, x3, 2
-;;       br_if_not32 x4, 0xe    // target = 0x53
-;;   4b: xmov x6, x24
-;;       jump -0x40    // target = 0xe
-;;   53: call2 x0, x0, 0x10    // target = 0x63
+;;       br_if32 x4, -0x37    // target = 0xe
+;;   4b: call2 x0, x0, 0x10    // target = 0x5b
 ;;       xmov x0, x24
 ;;       pop_frame_restore 16, x24
 ;;       ret
