@@ -141,6 +141,27 @@ pub(crate) fn define() -> SettingGroup {
     );
 
     settings.add_enum(
+        "tail_arg_regs",
+        "Integer argument registers of the `tail` calling convention.",
+        r#"
+            Only `tail` changes; every other calling convention is unaffected.
+            Every function and call site that uses `tail` must be compiled with
+            the same value, so this is an ABI setting (Wasmtime records it in
+            its artifacts).
+
+            - `standard`: x86-64 rdi, rsi, rdx, rcx, r8, r9; aarch64 x2-x7.
+            - `wide`: x86-64 adds rax (7); aarch64 adds x9-x15 (13). The added
+              registers are already caller-saved.
+            - `wide_trade`: as `wide`, and on x86-64 also r12 and r13 (9), which
+              then become caller-saved for `tail` (callee-saved: rbx, r14, r15).
+              aarch64 is the same as `wide`.
+
+            Other ISAs ignore this setting.
+        "#,
+        vec!["standard", "wide", "wide_trade"],
+    );
+
+    settings.add_enum(
         "libcall_call_conv",
         "Defines the calling convention to use for LibCalls call expansion.",
         r#"

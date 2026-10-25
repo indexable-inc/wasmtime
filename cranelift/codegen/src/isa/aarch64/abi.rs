@@ -191,6 +191,15 @@ impl ABIMachineSpec for AArch64MachineDeps {
         };
         let mut next_vreg = 0;
         let mut next_stack: u32 = 0;
+        // `tail_arg_regs = wide | wide_trade`: once x2-x7 are used, `tail`
+        // integer arguments continue in x9-x15. x8 stays the return-area
+        // pointer; x16/x17 (stack limit, probes, tail-call shuffling), x1
+        // (`return_call_indirect` target) and x0 are untouched. x9 is also the
+        // retval temp, which is only used after the call returns.
+        let wide_tail_args = call_conv == isa::CallConv::Tail
+            && args_or_rets == ArgsOrRets::Args
+            && flags.tail_arg_regs() != settings::TailArgRegs::Standard;
+        let mut next_wide_xreg = 9;
 
         // Note on return values: on the regular ABI, we may return values
         // in 8 registers for V128 and I64 registers independently of the
@@ -375,6 +384,17 @@ impl ABIMachineSpec for AArch64MachineDeps {
                     remaining_reg_vals -= 1;
                     continue;
                 }
+            }
+
+            if wide_tail_args && !is_multi_reg && rcs[0] == RegClass::Int && next_wide_xreg <= 15 {
+                args.push(ABIArg::reg(
+                    xreg(next_wide_xreg).to_real_reg().unwrap(),
+                    param.value_type,
+                    param.extension,
+                    param.purpose,
+                ));
+                next_wide_xreg += 1;
+                continue;
             }
 
             // Spill to the stack

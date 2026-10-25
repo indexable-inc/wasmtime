@@ -36,6 +36,7 @@ mod import_indexes;
 mod instance;
 mod intrinsics;
 mod invoke_func_via_table;
+mod ix_wasm_cc;
 mod limits;
 mod linker;
 mod memory;

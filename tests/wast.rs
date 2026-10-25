@@ -112,6 +112,15 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
         cfg.cranelift_wasmtime_debug_checks(true);
     }
 
+    // ix fork: run the whole suite with the wide wasm-to-wasm calling
+    // convention (`WASMTIME_TEST_IX_WASM_CC=wide|wide_trade`). Native Cranelift
+    // only; the option refuses Pulley and Winch.
+    if matches!(config.compiler, Compiler::CraneliftNative) {
+        if let Ok(v) = std::env::var("WASMTIME_TEST_IX_WASM_CC") {
+            cfg.ix_wasm_cc(v.parse().expect("WASMTIME_TEST_IX_WASM_CC"));
+        }
+    }
+
     // By default we'll allocate huge chunks (6gb) of the address space for each
     // linear memory. This is typically fine but when we emulate tests with QEMU
     // it turns out that it causes memory usage to balloon massively. Leave a

@@ -316,6 +316,7 @@ impl Metadata<'_> {
             concurrency_support,
             recording,
             asan_stack_switching,
+            ix_wasm_cc,
 
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
@@ -388,6 +389,10 @@ impl Metadata<'_> {
             "guard before linear memory",
         )?;
         Self::check_bool(table_lazy_init, other.table_lazy_init, "table lazy init")?;
+        // ix fork: a module calls other modules' functions directly through
+        // `VMFuncRef::wasm_call`, so every module in an engine must use the same
+        // wasm-to-wasm argument registers.
+        Self::check_int(ix_wasm_cc, other.ix_wasm_cc, "ix wasm calling convention")?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,

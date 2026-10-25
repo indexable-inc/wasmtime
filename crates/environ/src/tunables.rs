@@ -208,6 +208,12 @@ define_tunables! {
         /// Whether `metadata.code.branch_hint` sections are parsed and used to
         /// mark cold blocks during compilation.
         pub branch_hinting: bool,
+
+        /// ix fork: integer argument registers of the calling convention
+        /// between wasm functions (Cranelift's `tail`). Every function and
+        /// trampoline of every module in an engine must agree, so this is part
+        /// of the artifact check. See `Config::ix_wasm_cc`.
+        pub ix_wasm_cc: IxWasmCc,
     }
 
     pub struct ConfigTunables {
@@ -297,6 +303,7 @@ impl Tunables {
             metadata_for_gc_heap_corruption: true,
             branch_hinting: false,
             debug_symbols: true,
+            ix_wasm_cc: IxWasmCc::Standard,
         }
     }
 
@@ -434,6 +441,52 @@ impl<'a> MemoryTunables<'a> {
     /// linear-memory flavor and a GC-heap flavor.
     pub fn tunables(&self) -> &'a Tunables {
         self.tunables
+    }
+}
+
+/// ix fork: integer argument registers of the wasm-to-wasm calling convention
+/// (Cranelift `tail_arg_regs`). Host entry and exit go through Cranelift-compiled
+/// trampolines, which use the same setting, so the host ABI does not change.
+#[derive(Clone, Copy, Hash, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
+pub enum IxWasmCc {
+    /// Upstream: x86-64 rdi..r9, aarch64 x2..x7 (two of them are the vmctx
+    /// pointers, so 4 wasm integer parameters in registers).
+    #[default]
+    Standard,
+    /// x86-64 adds rax (5 wasm integer parameters in registers); aarch64 adds
+    /// x9..x15 (11). The added registers are already caller-saved.
+    Wide,
+    /// As `Wide`; on x86-64 also r12 and r13 (7 wasm integer parameters),
+    /// which stop being callee-saved for wasm functions.
+    WideTrade,
+}
+
+impl IxWasmCc {
+    /// The Cranelift `tail_arg_regs` value for this setting.
+    pub fn cranelift_flag(self) -> &'static str {
+        match self {
+            IxWasmCc::Standard => "standard",
+            IxWasmCc::Wide => "wide",
+            IxWasmCc::WideTrade => "wide_trade",
+        }
+    }
+}
+
+impl fmt::Display for IxWasmCc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str(self.cranelift_flag())
+    }
+}
+
+impl FromStr for IxWasmCc {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "standard" => Ok(IxWasmCc::Standard),
+            "wide" => Ok(IxWasmCc::Wide),
+            "wide_trade" | "wide-trade" => Ok(IxWasmCc::WideTrade),
+            _ => Err(format!("unknown ix wasm calling convention `{s}`")),
+        }
     }
 }
 
