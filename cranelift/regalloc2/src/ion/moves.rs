@@ -15,8 +15,8 @@
 use alloc::vec;
 
 use super::{
-    Env, InsertMovePrio, InsertedMove, InsertedMoves, LiveRangeFlag, LiveRangeIndex,
-    RedundantMoveEliminator, VRegIndex,
+    BlockExitStates, Env, InsertMovePrio, InsertedMove, InsertedMoves, LiveRangeFlag,
+    LiveRangeIndex, RedundantMoveEliminator, VRegIndex,
 };
 use crate::ion::data_structures::{
     u64_key, BlockparamIn, BlockparamOut, CodeRange, Edits, FixedRegFixupLevel, LiveRangeKey,
@@ -789,8 +789,7 @@ impl<'a, F: Function> Env<'a, F> {
         // The tracker's state at the end of each block that is the only
         // predecessor of a later block, so that block starts from it
         // instead of from nothing. Only blocks that need it are saved.
-        let mut block_exit_states: FxHashMap<Block, RedundantMoveEliminator> =
-            FxHashMap::default();
+        let mut block_exit_states = BlockExitStates::default();
 
         /// Apply the register and stack-slot writes of instructions
         /// `insts` (defs, clobbers, scratch registers) to the tracker.
@@ -826,7 +825,7 @@ impl<'a, F: Function> Env<'a, F> {
         fn redundant_move_process_side_effects<'a, F: Function>(
             this: &Env<'a, F>,
             redundant_moves: &mut RedundantMoveEliminator,
-            block_exit_states: &mut FxHashMap<Block, RedundantMoveEliminator>,
+            block_exit_states: &mut BlockExitStates,
             from: ProgPoint,
             to: ProgPoint,
         ) {
@@ -857,16 +856,25 @@ impl<'a, F: Function> Env<'a, F> {
             // control reaches the block only from that exit (a
             // terminator's own writes are applied like any other
             // instruction's). Otherwise nothing is known at entry.
+            // `BlockExitStates` bounds what is kept (see there).
             let save_exit = |this: &Env<'a, F>,
                              block: Block,
                              state: &RedundantMoveEliminator,
-                             saved: &mut FxHashMap<Block, RedundantMoveEliminator>| {
-                let needed = this.func.block_succs(block).iter().any(|&succ| {
-                    succ.index() > block.index() && this.func.block_preds(succ).len() == 1
-                });
-                if needed {
-                    saved.insert(block, state.clone());
-                }
+                             saved: &mut BlockExitStates| {
+                let succs = this.func.block_succs(block);
+                let consumers = succs
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, &succ)| {
+                        !succs[..i].contains(&succ)
+                            && BlockExitStates::inherits(
+                                block,
+                                succ,
+                                this.func.block_preds(succ).len(),
+                            )
+                    })
+                    .count();
+                saved.save(block, state, consumers as u32);
             };
             let from_end = this.func.block_insns(from_block).last().next();
             redundant_move_apply_insts(
@@ -879,9 +887,9 @@ impl<'a, F: Function> Env<'a, F> {
                 let block = Block::new(b);
                 let preds = this.func.block_preds(block);
                 match (preds.len(), preds.first()) {
-                    (1, Some(&pred)) if pred.index() < b => {
-                        match block_exit_states.get(&pred) {
-                            Some(state) => *redundant_moves = state.clone(),
+                    (1, Some(&pred)) if BlockExitStates::inherits(pred, block, 1) => {
+                        match block_exit_states.take(pred) {
+                            Some(state) => *redundant_moves = state,
                             None => redundant_moves.clear(),
                         }
                     }
