@@ -265,6 +265,15 @@ impl IndexSet {
     pub(crate) fn is_empty(&self) -> bool {
         self.elems.is_empty()
     }
+
+    /// How many 64-bit words the set stores (its memory and the cost of a
+    /// clone, union or iteration), for the allocator's work budget.
+    pub(crate) fn words(&self) -> usize {
+        match &self.elems {
+            AdaptiveMap::Small { len, .. } => *len as usize,
+            AdaptiveMap::Large(map) => map.len(),
+        }
+    }
 }
 
 pub struct SetBitsIter(u64);

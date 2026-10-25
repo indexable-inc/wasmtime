@@ -16,14 +16,18 @@ use super::{
     AllocRegResult, Env, LiveRangeKey, PRegIndex, RegTraversalIter, SpillSetIndex, SpillSlotData,
     SpillSlotIndex,
 };
-use crate::{Allocation, Function, SpillSlot};
+use crate::{Allocation, Function, RegAllocError, SpillSlot};
 
 impl<'a, F: Function> Env<'a, F> {
-    pub fn try_allocating_regs_for_spilled_bundles(&mut self) {
+    pub fn try_allocating_regs_for_spilled_bundles(&mut self) -> Result<(), RegAllocError> {
         trace!("allocating regs for spilled bundles");
         let mut scratch = core::mem::take(&mut self.ctx.scratch_conflicts);
         for i in 0..self.ctx.spilled_bundles.len() {
             let bundle = self.ctx.spilled_bundles[i]; // don't borrow self
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_conflicts = scratch;
+                return Err(e);
+            }
 
             if self.ctx.bundles[bundle].ranges.is_empty() {
                 continue;
@@ -71,6 +75,7 @@ impl<'a, F: Function> Env<'a, F> {
             }
         }
         self.ctx.scratch_conflicts = scratch;
+        Ok(())
     }
 
     pub fn spillslot_can_fit_spillset(

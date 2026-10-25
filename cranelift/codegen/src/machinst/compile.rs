@@ -4,11 +4,29 @@ use crate::dominator_tree::DominatorTree;
 use crate::ir::Function;
 use crate::isa::TargetIsa;
 use crate::machinst::*;
-use crate::settings::RegallocAlgorithm;
+use crate::settings::{RegallocAlgorithm, RegallocBudget};
 use crate::timing;
 use crate::trace;
 
-use regalloc2::{Algorithm, RegallocOptions};
+use crate::result::CodegenError;
+use regalloc2::{Algorithm, Function as _, RegAllocError, RegallocOptions};
+
+/// Work budget of the backtracking allocator per unit of function size (an
+/// instruction, block or virtual register), see the `regalloc_budget`
+/// setting and `RegallocOptions::fuel`.
+///
+/// Calibration (x86-64, opt_level speed, 2026-10-25): over the 36 868
+/// functions of three real modules (Turso 13 MB, Kusama runtime 8.8 MB,
+/// SpiderMonkey 7.4 MB) the most fuel any function used was 43 per unit
+/// (p99 18, median 2), and the most liveness-set words 4.0 per unit (p99
+/// 1.1) against the cap of 16 (`ion::FUEL_PER_LIVE_WORD`). Small functions
+/// sit under `REGALLOC_FUEL_MIN`; the largest used 10% of it. The hostile
+/// cases in wasm-host bench/results/2026-10-25-compile-dos hit it within a
+/// second for 16k if/else diamonds (base: 55 s, 4.3 GB).
+pub const REGALLOC_FUEL_PER_UNIT: u64 = 256;
+
+/// Budget floor, so small functions never hit it.
+pub const REGALLOC_FUEL_MIN: u64 = 1 << 24;
 
 /// Compile the given function down to VCode with allocated registers, ready
 /// for binary emission.
@@ -63,7 +81,57 @@ pub fn compile<B: LowerBackend + TargetIsa>(
             RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,
         };
 
-        regalloc2::run_with_ctx(&vcode, vcode.abi.machine_env(), &options, regalloc_ctx)
+        let budget = b.flags().regalloc_budget();
+        if budget != RegallocBudget::Unbounded {
+            let units = (vcode.num_insts() + vcode.num_blocks() + vcode.num_vregs()) as u64;
+            options.fuel = Some(
+                units
+                    .saturating_mul(REGALLOC_FUEL_PER_UNIT)
+                    .max(REGALLOC_FUEL_MIN),
+            );
+        }
+
+        let mut result =
+            regalloc2::run_with_ctx(&vcode, vcode.abi.machine_env(), &options, regalloc_ctx)
+                .map(|_| ());
+        if let Err(RegAllocError::OutOfFuel) = result {
+            log::warn!(
+                "register allocation of {} exceeded its budget ({} units for {} insts, {} blocks, {} vregs): {:?}",
+                f.name,
+                options.fuel.unwrap_or(0),
+                vcode.num_insts(),
+                vcode.num_blocks(),
+                vcode.num_vregs(),
+                budget,
+            );
+            match budget {
+                RegallocBudget::Reject => return Err(CodegenError::ImplLimitExceeded),
+                RegallocBudget::Fallback => {
+                    options.algorithm = Algorithm::Fastalloc;
+                    options.fuel = None;
+                    result = regalloc2::run_with_ctx(
+                        &vcode,
+                        vcode.abi.machine_env(),
+                        &options,
+                        regalloc_ctx,
+                    )
+                    .map(|_| ());
+                }
+                RegallocBudget::Unbounded => unreachable!("no budget was set"),
+            }
+        } else if let Some(fuel) = options.fuel {
+            log::debug!(
+                "regalloc budget: used {} of {} units, live words peak {} ({} insts, {} blocks, {} vregs)",
+                regalloc_ctx.output.stats.fuel_used,
+                fuel,
+                regalloc_ctx.output.stats.live_words_peak,
+                vcode.num_insts(),
+                vcode.num_blocks(),
+                vcode.num_vregs(),
+            );
+        }
+
+        result
             .map_err(|err| {
                 log::error!(
                     "Register allocation error for vcode\n\

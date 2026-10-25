@@ -284,6 +284,8 @@ impl<'a, F: Function> Env<'a, F> {
         // liveouts.
         let mut workqueue = core::mem::take(&mut self.ctx.scratch_workqueue);
         let mut workqueue_set = core::mem::take(&mut self.ctx.scratch_workqueue_set);
+        // A run that ran out of fuel can leave blocks of another function here.
+        workqueue.clear();
         workqueue_set.clear();
         // Initialize workqueue with postorder traversal.
         for &block in &self.cfginfo.postorder[..] {
@@ -301,6 +303,10 @@ impl<'a, F: Function> Env<'a, F> {
 
             let mut live = self.liveouts[block.index()].clone();
             trace!(" -> initial liveout set: {:?}", live);
+            // The clone, the scan and the unions below cost the set's size.
+            // Many values live across many blocks make these sets
+            // blocks x values in total, the dominant time and memory here.
+            self.burn(1 + live.words() + insns.len());
 
             // Include outgoing blockparams in the initial live set.
             if self.func.is_branch(insns.last()) {
@@ -340,7 +346,12 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             for &pred in self.func.block_preds(block) {
-                if self.ctx.liveouts[pred.index()].union_with(&live) {
+                self.burn(live.words());
+                let before = self.ctx.liveouts[pred.index()].words();
+                let changed = self.ctx.liveouts[pred.index()].union_with(&live);
+                let after = self.ctx.liveouts[pred.index()].words();
+                self.grow_live_words(before, after);
+                if changed {
                     if !workqueue_set.contains(&pred) {
                         workqueue_set.insert(pred);
                         workqueue.push_back(pred);
@@ -349,7 +360,14 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             trace!("computed liveins at block{}: {:?}", block.index(), live);
+            let (before, after) = (self.liveins[block.index()].words(), live.words());
+            self.grow_live_words(before, after);
             self.liveins[block.index()] = live;
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_workqueue = workqueue;
+                self.ctx.scratch_workqueue_set = workqueue_set;
+                return Err(e);
+            }
         }
 
         // Check that there are no liveins to the entry block.
@@ -383,6 +401,7 @@ impl<'a, F: Function> Env<'a, F> {
         let mut vreg_ranges = core::mem::take(&mut self.ctx.scratch_vreg_ranges);
         vreg_ranges.repopulate(self.func.num_vregs(), LiveRangeIndex::invalid());
         let mut operand_rewrites = core::mem::take(&mut self.ctx.scratch_operand_rewrites);
+        operand_rewrites.clear();
 
         for i in (0..self.func.num_blocks()).rev() {
             let block = Block::new(i);
@@ -392,6 +411,12 @@ impl<'a, F: Function> Env<'a, F> {
 
             // Init our local live-in set.
             let mut live = self.liveouts[block.index()].clone();
+            self.burn(1 + 2 * live.words() + insns.len());
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_vreg_ranges = vreg_ranges;
+                self.ctx.scratch_operand_rewrites = operand_rewrites;
+                return Err(e);
+            }
 
             // If the last instruction is a branch (rather than
             // return), create blockparam_out entries.

@@ -59,7 +59,7 @@ pub fn check(t: TestCase) {
     }
 
     CTX.with(|ctx| {
-        ion::run(func, &env, &mut *ctx.borrow_mut(), *annotate, *check_ssa)
+        ion::run(func, &env, &mut *ctx.borrow_mut(), *annotate, *check_ssa, None)
             .expect("regalloc did not succeed");
 
         let mut checker = checker::Checker::new(func, &env);

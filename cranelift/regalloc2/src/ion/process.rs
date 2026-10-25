@@ -41,6 +41,8 @@ impl<'a, F: Function> Env<'a, F> {
     pub fn process_bundles(&mut self) -> Result<(), RegAllocError> {
         while let Some((bundle, hint)) = self.ctx.allocation_queue.pop() {
             self.ctx.output.stats.process_bundle_count += 1;
+            self.burn(1);
+            self.check_fuel()?;
             self.process_bundle(bundle, hint)?;
         }
         self.ctx.output.stats.final_liverange_count = self.ranges.len();
@@ -95,98 +97,110 @@ impl<'a, F: Function> Env<'a, F> {
         );
         let mut first_conflict: Option<ProgPoint> = None;
 
-        'ranges: for entry in bundle_ranges {
-            trace!(" -> range LR {:?}: {:?}", entry.index, entry.range);
-            let key = LiveRangeKey::from_range(&entry.range);
+        // Work done here, for the budget (`Env::burn`); spent at the end
+        // because `bundle_ranges` borrows `self`.
+        let mut steps = 1;
+        let result = 'scan: {
+            'ranges: for entry in bundle_ranges {
+                trace!(" -> range LR {:?}: {:?}", entry.index, entry.range);
+                let key = LiveRangeKey::from_range(&entry.range);
 
-            let mut skips = 0;
-            'alloc: loop {
-                trace!("  -> PReg range {:?}", preg_range_iter.peek());
+                let mut skips = 0;
+                'alloc: loop {
+                    steps += 1;
+                    trace!("  -> PReg range {:?}", preg_range_iter.peek());
 
-                // Advance our BTree traversal until it is >= this bundle
-                // range (i.e., skip PReg allocations in the BTree that
-                // are completely before this bundle range).
+                    // Advance our BTree traversal until it is >= this bundle
+                    // range (i.e., skip PReg allocations in the BTree that
+                    // are completely before this bundle range).
 
-                if preg_range_iter.peek().is_some() && *preg_range_iter.peek().unwrap().0 < key {
-                    trace!(
-                        "Skipping PReg range {:?}",
-                        preg_range_iter.peek().unwrap().0
-                    );
-                    preg_range_iter.next();
-                    skips += 1;
-                    if skips >= 16 {
-                        let from_pos = entry.range.from;
-                        let from_key = LiveRangeKey::from_range(&CodeRange {
-                            from: from_pos,
-                            to: from_pos,
-                        });
-                        preg_range_iter = self.ctx.pregs[reg.index()]
-                            .allocations
-                            .btree
-                            .range(from_key..)
-                            .peekable();
-                        skips = 0;
-                    }
-                    continue 'alloc;
-                }
-                skips = 0;
-
-                // If there are no more PReg allocations, we're done!
-                if preg_range_iter.peek().is_none() {
-                    trace!(" -> no more PReg allocations; so no conflict possible!");
-                    break 'ranges;
-                }
-
-                // If the current PReg range is beyond this range, there is no conflict; continue.
-                if *preg_range_iter.peek().unwrap().0 > key {
-                    trace!(
-                        " -> next PReg allocation is at {:?}; moving to next VReg range",
-                        preg_range_iter.peek().unwrap().0
-                    );
-                    break 'alloc;
-                }
-
-                // Otherwise, there is a conflict.
-                let preg_key = *preg_range_iter.peek().unwrap().0;
-                debug_assert_eq!(preg_key, key); // Assert that this range overlaps.
-                let preg_range = preg_range_iter.next().unwrap().1;
-
-                trace!(" -> btree contains range {:?} that overlaps", preg_range);
-                if preg_range.is_valid() {
-                    trace!("   -> from vreg {:?}", self.ctx.ranges[*preg_range].vreg);
-                    // range from an allocated bundle: find the bundle and add to
-                    // conflicts list.
-                    let conflict_bundle = self.ctx.ranges[*preg_range].bundle;
-                    trace!("   -> conflict bundle {:?}", conflict_bundle);
-                    if self.ctx.conflict_set.insert(conflict_bundle) {
-                        conflicts.push(conflict_bundle);
-                        max_conflict_weight = core::cmp::max(
-                            max_conflict_weight,
-                            self.ctx.bundles[conflict_bundle].cached_spill_weight(),
+                    if preg_range_iter.peek().is_some() && *preg_range_iter.peek().unwrap().0 < key
+                    {
+                        trace!(
+                            "Skipping PReg range {:?}",
+                            preg_range_iter.peek().unwrap().0
                         );
-                        if max_allowable_cost.is_some()
-                            && max_conflict_weight > max_allowable_cost.unwrap()
-                        {
-                            trace!("   -> reached high cost, retrying early");
-                            return AllocRegResult::ConflictHighCost;
+                        preg_range_iter.next();
+                        skips += 1;
+                        if skips >= 16 {
+                            let from_pos = entry.range.from;
+                            let from_key = LiveRangeKey::from_range(&CodeRange {
+                                from: from_pos,
+                                to: from_pos,
+                            });
+                            preg_range_iter = self.ctx.pregs[reg.index()]
+                                .allocations
+                                .btree
+                                .range(from_key..)
+                                .peekable();
+                            skips = 0;
                         }
+                        continue 'alloc;
+                    }
+                    skips = 0;
+
+                    // If there are no more PReg allocations, we're done!
+                    if preg_range_iter.peek().is_none() {
+                        trace!(" -> no more PReg allocations; so no conflict possible!");
+                        break 'ranges;
                     }
 
-                    if first_conflict.is_none() {
-                        first_conflict = Some(ProgPoint::from_index(core::cmp::max(
-                            preg_key.from,
-                            key.from,
-                        )));
+                    // If the current PReg range is beyond this range, there is no conflict; continue.
+                    if *preg_range_iter.peek().unwrap().0 > key {
+                        trace!(
+                            " -> next PReg allocation is at {:?}; moving to next VReg range",
+                            preg_range_iter.peek().unwrap().0
+                        );
+                        break 'alloc;
                     }
-                } else {
-                    trace!("   -> conflict with fixed reservation");
-                    // range from a direct use of the PReg (due to clobber).
-                    return AllocRegResult::ConflictWithFixed(
-                        max_conflict_weight,
-                        ProgPoint::from_index(preg_key.from),
-                    );
+
+                    // Otherwise, there is a conflict.
+                    let preg_key = *preg_range_iter.peek().unwrap().0;
+                    debug_assert_eq!(preg_key, key); // Assert that this range overlaps.
+                    let preg_range = preg_range_iter.next().unwrap().1;
+
+                    trace!(" -> btree contains range {:?} that overlaps", preg_range);
+                    if preg_range.is_valid() {
+                        trace!("   -> from vreg {:?}", self.ctx.ranges[*preg_range].vreg);
+                        // range from an allocated bundle: find the bundle and add to
+                        // conflicts list.
+                        let conflict_bundle = self.ctx.ranges[*preg_range].bundle;
+                        trace!("   -> conflict bundle {:?}", conflict_bundle);
+                        if self.ctx.conflict_set.insert(conflict_bundle) {
+                            conflicts.push(conflict_bundle);
+                            max_conflict_weight = core::cmp::max(
+                                max_conflict_weight,
+                                self.ctx.bundles[conflict_bundle].cached_spill_weight(),
+                            );
+                            if max_allowable_cost.is_some()
+                                && max_conflict_weight > max_allowable_cost.unwrap()
+                            {
+                                trace!("   -> reached high cost, retrying early");
+                                break 'scan Some(AllocRegResult::ConflictHighCost);
+                            }
+                        }
+
+                        if first_conflict.is_none() {
+                            first_conflict = Some(ProgPoint::from_index(core::cmp::max(
+                                preg_key.from,
+                                key.from,
+                            )));
+                        }
+                    } else {
+                        trace!("   -> conflict with fixed reservation");
+                        // range from a direct use of the PReg (due to clobber).
+                        break 'scan Some(AllocRegResult::ConflictWithFixed(
+                            max_conflict_weight,
+                            ProgPoint::from_index(preg_key.from),
+                        ));
+                    }
                 }
             }
+            None
+        };
+        self.burn(steps);
+        if let Some(result) = result {
+            return result;
         }
 
         if conflicts.len() > 0 {
@@ -419,6 +433,7 @@ impl<'a, F: Function> Env<'a, F> {
         mut trim_ends_into_spill_bundle: bool,
     ) {
         self.ctx.output.stats.splits += 1;
+        self.burn(1 + self.ctx.bundles[bundle].ranges.len());
         trace!(
             "split bundle {bundle:?} at {split_at:?} and requeue with reg hint (for first part) {hint:?}"
         );
