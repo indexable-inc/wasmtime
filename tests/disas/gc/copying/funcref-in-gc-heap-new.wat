@@ -12,10 +12,10 @@
 ;;     ss0 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 177 ""
 ;;     region4 = 98 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 196 ""
 ;;     region8 = 239 ""
@@ -33,7 +33,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
-;; @0020                               v4 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0020                               v4 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0020                               v5 = load.i32 notrap aligned region3 v4
 ;; @0020                               v6 = load.i32 notrap aligned region4 v4+4
 ;; @0020                               v12 = uextend.i64 v5
@@ -52,7 +52,7 @@
 ;;                                     v61 = load.i64 notrap aligned readonly can_move region7 v60+32
 ;; @0020                               v29 = iadd v61, v12
 ;; @0020                               store user2 region8 v59, v29  ; v59 = -1342177278
-;;                                     v62 = load.i64 notrap aligned readonly can_move region5 v0+40
+;;                                     v62 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;;                                     v63 = load.i32 notrap aligned readonly can_move region6 v62
 ;; @0020                               store user2 region9 v63, v29+4
 ;;                                     v64 = iconst.i64 32
@@ -61,7 +61,7 @@
 ;;
 ;;                                 block3 cold:
 ;; @0020                               v16 = iconst.i32 -1342177278
-;; @0020                               v17 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0020                               v17 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0020                               v18 = load.i32 notrap aligned readonly can_move region6 v17
 ;; @0020                               v3 = iconst.i32 32
 ;; @0020                               v19 = iconst.i32 16

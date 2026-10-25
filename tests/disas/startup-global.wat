@@ -43,6 +43,6 @@
 ;;
 ;; block0(v0: i64, v1: i64):
 ;;     v2 = iconst.i64 0
-;;     store notrap aligned region0 v2, v0+48  ; v2 = 0
+;;     store notrap aligned region0 v2, v0+64  ; v2 = 0
 ;;     return
 ;; }

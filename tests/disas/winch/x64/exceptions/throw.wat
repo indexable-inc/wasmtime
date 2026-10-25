@@ -27,7 +27,7 @@
 ;;       ├─╼ exception frame offset: SP = FP - 0x10
 ;;       ╰─╼ exception handler: tag=0, context at [SP+0x8], handler=0xdc
 ;;       movq    8(%rsp), %r14
-;;       movq    0x28(%r14), %rcx
+;;       movq    0x30(%r14), %rcx
 ;;       movl    8(%rcx), %ecx
 ;;       subq    $4, %rsp
 ;;       movl    %eax, (%rsp)

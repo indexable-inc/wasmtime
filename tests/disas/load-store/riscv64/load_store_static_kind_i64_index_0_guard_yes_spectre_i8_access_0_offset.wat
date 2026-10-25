@@ -27,7 +27,7 @@
 ;;       auipc   a0, 0
 ;;       ld      a0, 0x34(a0)
 ;;       sltu    a0, a0, a2
-;;       ld      a1, 0x38(a4)
+;;       ld      a1, 0x40(a4)
 ;;       add     a1, a1, a2
 ;;       neg     a0, a0
 ;;       not     a0, a0
@@ -49,7 +49,7 @@
 ;;       auipc   a0, 0
 ;;       ld      a0, 0x34(a0)
 ;;       sltu    a0, a0, a2
-;;       ld      a1, 0x38(a3)
+;;       ld      a1, 0x40(a3)
 ;;       add     a1, a1, a2
 ;;       neg     a0, a0
 ;;       not     a0, a0

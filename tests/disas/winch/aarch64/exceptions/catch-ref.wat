@@ -34,7 +34,7 @@
 ;;       ├─╼ exception frame offset: SP = FP - 0x20
 ;;       ╰─╼ exception handler: tag=0, context at [SP+0x8], handler=0x158
 ;;   48: ldur    x9, [x28, #8]
-;;       ldur    x1, [x9, #0x28]
+;;       ldur    x1, [x9, #0x30]
 ;;       ldur    w1, [x1, #0xc]
 ;;       sub     x28, x28, #4
 ;;       mov     sp, x28

@@ -35,20 +35,20 @@
 ;;                                 block0(v0: i64, v1: i64):
 ;; @0039                               v2 = iconst.i32 1
 ;; @003b                               v3 = iconst.i32 2
-;; @003d                               v4 = load.i64 notrap aligned readonly can_move region2 v0+72
-;; @003d                               v5 = load.i64 notrap aligned readonly can_move region3 v0+56
+;; @003d                               v4 = load.i64 notrap aligned readonly can_move region2 v0+80
+;; @003d                               v5 = load.i64 notrap aligned readonly can_move region3 v0+64
 ;; @003d                               v6 = call_indirect sig0, v5(v4, v0)
 ;; @003f                               brif v6, block2, block3
 ;;
 ;;                                 block3:
-;; @0041                               v7 = load.i64 notrap aligned readonly can_move region2 v0+104
-;; @0041                               v8 = load.i64 notrap aligned readonly can_move region3 v0+88
+;; @0041                               v7 = load.i64 notrap aligned readonly can_move region2 v0+112
+;; @0041                               v8 = load.i64 notrap aligned readonly can_move region3 v0+96
 ;; @0041                               call_indirect sig1, v8(v7, v0, v2, v3)  ; v2 = 1, v3 = 2
 ;; @0043                               trap user12
 ;;
 ;;                                 block2:
-;; @0045                               v9 = load.i64 notrap aligned readonly can_move region2 v0+136
-;; @0045                               v10 = load.i64 notrap aligned readonly can_move region3 v0+120
+;; @0045                               v9 = load.i64 notrap aligned readonly can_move region2 v0+144
+;; @0045                               v10 = load.i64 notrap aligned readonly can_move region3 v0+128
 ;; @0045                               call_indirect sig1, v10(v9, v0, v2, v3)  ; v2 = 1, v3 = 2
 ;; @0047                               jump block1
 ;;

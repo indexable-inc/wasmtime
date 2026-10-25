@@ -24,7 +24,7 @@
 ;;       stur    x0, [x28, #8]
 ;;       stur    x1, [x28]
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x38]
+;;       ldur    x1, [x9, #0x40]
 ;;       add     x1, x1, w0, uxtw
 ;;       ldur    d0, [x1]
 ;;       ushll   v0.8h, v0.8b, #0

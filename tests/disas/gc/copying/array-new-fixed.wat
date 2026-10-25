@@ -11,10 +11,10 @@
 ;; function u0:0(i64 vmctx, i64, i64, i64, i64) -> i32 tail {
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 177 ""
 ;;     region4 = 98 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 196 ""
 ;;     region8 = 239 ""
@@ -31,7 +31,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64):
-;; @0025                               v14 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0025                               v14 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0025                               v15 = load.i32 notrap aligned region3 v14
 ;; @0025                               v16 = load.i32 notrap aligned region4 v14+4
 ;; @0025                               v22 = uextend.i64 v15
@@ -50,7 +50,7 @@
 ;;                                     v222 = load.i64 notrap aligned readonly can_move region7 v221+32
 ;; @0025                               v39 = iadd v222, v22
 ;; @0025                               store user2 region8 v220, v39  ; v220 = -1476395002
-;;                                     v223 = load.i64 notrap aligned readonly can_move region5 v0+40
+;;                                     v223 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;;                                     v224 = load.i32 notrap aligned readonly can_move region6 v223
 ;; @0025                               store user2 region9 v224, v39+4
 ;;                                     v225 = iconst.i64 48
@@ -59,7 +59,7 @@
 ;;
 ;;                                 block3 cold:
 ;; @0025                               v26 = iconst.i32 -1476395002
-;; @0025                               v27 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0025                               v27 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0025                               v28 = load.i32 notrap aligned readonly can_move region6 v27
 ;;                                     v140 = iconst.i32 48
 ;; @0025                               v29 = iconst.i32 16

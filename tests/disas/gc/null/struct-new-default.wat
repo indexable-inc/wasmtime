@@ -14,11 +14,11 @@
 ;; function u0:0(i64 vmctx, i64) -> i32 tail {
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 237 ""
 ;;     region4 = 206 ""
 ;;     region5 = 196 ""
-;;     region6 = 130 ""
+;;     region6 = 136 ""
 ;;     region7 = 6 ""
 ;;     region8 = 239 ""
 ;;     region9 = 134 ""
@@ -33,7 +33,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0021                               v9 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0021                               v9 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0021                               v10 = load.i32 notrap aligned region3 v9
 ;;                                     v42 = iconst.i32 7
 ;; @0021                               v13 = uadd_overflow_trap v10, v42, user18  ; v42 = 7
@@ -54,7 +54,7 @@
 ;;                                     v56 = uextend.i64 v55
 ;; @0021                               v26 = iadd v24, v56
 ;; @0021                               store user2 region8 v49, v26  ; v49 = -1342177256
-;; @0021                               v29 = load.i64 notrap aligned readonly can_move region6 v0+40
+;; @0021                               v29 = load.i64 notrap aligned readonly can_move region6 v0+48
 ;; @0021                               v30 = load.i32 notrap aligned readonly can_move region7 v29
 ;; @0021                               store user2 region9 v30, v26+4
 ;; @0021                               store.i32 notrap aligned region3 v16, v9

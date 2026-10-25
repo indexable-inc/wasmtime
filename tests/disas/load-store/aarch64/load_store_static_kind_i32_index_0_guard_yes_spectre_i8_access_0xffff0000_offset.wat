@@ -24,7 +24,7 @@
 ;;       mov     w11, w4
 ;;       mov     x12, #0xffff
 ;;       mov     x13, #0
-;;       ldr     x14, [x2, #0x38]
+;;       ldr     x14, [x2, #0x40]
 ;;       add     x14, x14, w4, uxtw
 ;;       mov     x15, #0xffff0000
 ;;       add     x14, x14, x15
@@ -40,7 +40,7 @@
 ;;       mov     w11, w4
 ;;       mov     x12, #0xffff
 ;;       mov     x13, #0
-;;       ldr     x14, [x2, #0x38]
+;;       ldr     x14, [x2, #0x40]
 ;;       add     x14, x14, w4, uxtw
 ;;       mov     x15, #0xffff0000
 ;;       add     x14, x14, x15

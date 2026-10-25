@@ -13,7 +13,7 @@
 ;;     ss0 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 130 ""
+;;     region2 = 136 ""
 ;;     region3 = 6 ""
 ;;     region4 = 196 ""
 ;;     region5 = 147 ""
@@ -29,7 +29,7 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
 ;; @0020                               v4 = iconst.i32 -1342177280
-;; @0020                               v5 = load.i64 notrap aligned readonly can_move region2 v0+40
+;; @0020                               v5 = load.i64 notrap aligned readonly can_move region2 v0+48
 ;; @0020                               v6 = load.i32 notrap aligned readonly can_move region3 v5
 ;; @0020                               v3 = iconst.i32 32
 ;; @0020                               v7 = iconst.i32 8

@@ -30,7 +30,7 @@
 ;;       ├─╼ exception frame offset: SP = FP - 0x10
 ;;       ╰─╼ exception handler: tag=0, context at [SP+0x8], handler=0x12c
 ;;       movq    8(%rsp), %r14
-;;       movq    0x28(%r14), %rcx
+;;       movq    0x30(%r14), %rcx
 ;;       movl    0xc(%rcx), %ecx
 ;;       subq    $4, %rsp
 ;;       movl    %eax, (%rsp)
@@ -124,7 +124,7 @@
 ;;       andl    $2, %r11d
 ;;       testl   %r11d, %r11d
 ;;       jne     0x22c
-;;  1ce: movq    0x20(%r14), %rbx
+;;  1ce: movq    0x28(%r14), %rbx
 ;;       movl    (%rbx), %r11d
 ;;       movl    %r11d, 0x10(%rdx)
 ;;       movl    (%rdx), %r11d

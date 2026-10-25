@@ -72,7 +72,7 @@
 ;;       cmpq    %rsp, %r10
 ;;       ja      0x4f
 ;;   39: movq    %rdi, %rsi
-;;       movq    0x48(%rdi), %rdi
+;;       movq    0x50(%rdi), %rdi
 ;;       movl    $0x4d2, %edx
 ;;       callq   0x60
 ;;       movq    %rbp, %rsp
@@ -96,14 +96,14 @@
 ;;       movq    %r15, 0x40(%rsp)
 ;;       movq    %rdi, (%rsp)
 ;;       movq    (%rsp), %rdi
-;;       movq    0xa8(%rdi), %r10
+;;       movq    0xb0(%rdi), %r10
 ;;       movl    (%r10), %r11d
 ;;       movq    %r10, 0x10(%rsp)
 ;;       testl   %r11d, %r11d
 ;;       movq    %r11, 8(%rsp)
 ;;       je      0xff
 ;;   bb: movq    (%rsp), %rdi
-;;       movq    0x48(%rdi), %rdi
+;;       movq    0x50(%rdi), %rdi
 ;;       movq    (%rsp), %rsi
 ;;       callq   0
 ;;       ├─╼ exception frame offset: SP = FP - 0x50

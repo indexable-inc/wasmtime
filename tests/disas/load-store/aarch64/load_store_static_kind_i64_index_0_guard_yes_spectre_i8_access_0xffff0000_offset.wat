@@ -23,7 +23,7 @@
 ;;       mov     x29, sp
 ;;       mov     x10, #0xffff
 ;;       mov     x11, #0
-;;       ldr     x12, [x2, #0x38]
+;;       ldr     x12, [x2, #0x40]
 ;;       add     x12, x12, x4
 ;;       mov     x13, #0xffff0000
 ;;       add     x12, x12, x13
@@ -38,7 +38,7 @@
 ;;       mov     x29, sp
 ;;       mov     x10, #0xffff
 ;;       mov     x11, #0
-;;       ldr     x12, [x2, #0x38]
+;;       ldr     x12, [x2, #0x40]
 ;;       add     x12, x12, x4
 ;;       mov     x13, #0xffff0000
 ;;       add     x12, x12, x13

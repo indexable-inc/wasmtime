@@ -14,7 +14,7 @@
 ;; function u0:0(i64 vmctx, i64) -> i32 tail {
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 130 ""
+;;     region2 = 136 ""
 ;;     region3 = 6 ""
 ;;     region4 = 196 ""
 ;;     region5 = 147 ""
@@ -31,7 +31,7 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64):
 ;; @0021                               v6 = iconst.i32 -1342177280
-;; @0021                               v7 = load.i64 notrap aligned readonly can_move region2 v0+40
+;; @0021                               v7 = load.i64 notrap aligned readonly can_move region2 v0+48
 ;; @0021                               v8 = load.i32 notrap aligned readonly can_move region3 v7
 ;; @0021                               v5 = iconst.i32 40
 ;; @0021                               v9 = iconst.i32 8

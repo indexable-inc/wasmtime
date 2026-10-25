@@ -37,7 +37,7 @@
 ;;       ╰─╼ stack_map: frame_size=48, frame_offsets=[4, 12]
 ;;       mov     sp, x28
 ;;       ldur    x9, [x28, #0x14]
-;;       ldur    x1, [x9, #0x28]
+;;       ldur    x1, [x9, #0x30]
 ;;       ldur    w1, [x1, #4]
 ;;       sub     x28, x28, #4
 ;;       mov     sp, x28

@@ -31,10 +31,10 @@
 ;;     ss0 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 177 ""
 ;;     region4 = 98 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 196 ""
 ;;     region8 = 239 ""
@@ -59,7 +59,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0043                               v4 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0043                               v4 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0043                               v5 = load.i32 notrap aligned region3 v4
 ;; @0043                               v6 = load.i32 notrap aligned region4 v4+4
 ;; @0043                               v12 = uextend.i64 v5
@@ -78,7 +78,7 @@
 ;;                                     v107 = load.i64 notrap aligned readonly can_move region7 v106+32
 ;; @0043                               v29 = iadd v107, v12
 ;; @0043                               store user2 region8 v105, v29  ; v105 = -1342177278
-;;                                     v108 = load.i64 notrap aligned readonly can_move region5 v0+40
+;;                                     v108 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;;                                     v109 = load.i32 notrap aligned readonly can_move region6 v108
 ;; @0043                               store user2 region9 v109, v29+4
 ;;                                     v110 = iconst.i64 32
@@ -87,7 +87,7 @@
 ;;
 ;;                                 block3 cold:
 ;; @0043                               v16 = iconst.i32 -1342177278
-;; @0043                               v17 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0043                               v17 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0043                               v18 = load.i32 notrap aligned readonly can_move region6 v17
 ;; @0043                               v3 = iconst.i32 32
 ;; @0043                               v19 = iconst.i32 16
@@ -113,8 +113,8 @@
 ;; @005a                               jump block9
 ;;
 ;;                                 block9:
-;; @0061                               v78 = load.i64 notrap aligned readonly can_move region15 v0+56
-;; @0061                               v77 = load.i64 notrap aligned readonly can_move region14 v0+72
+;; @0061                               v78 = load.i64 notrap aligned readonly can_move region15 v0+64
+;; @0061                               v77 = load.i64 notrap aligned readonly can_move region14 v0+80
 ;; @0061                               try_call_indirect v78(v77, v0), sig3, block18, [ context v0, tag0: block19(exn0) ], stack_map=[i32 @ ss0+0]
 ;;
 ;;                                 block19(v84: i64):

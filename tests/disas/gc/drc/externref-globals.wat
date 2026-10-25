@@ -20,7 +20,7 @@
 ;;     region3 = 196 ""
 ;;     region4 = 206 ""
 ;;     region5 = 239 ""
-;;     region6 = 65 ""
+;;     region6 = 130 ""
 ;;     region7 = 210 ""
 ;;     region8 = 121 ""
 ;;     region9 = 175 ""
@@ -35,8 +35,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0034                               v2 = iconst.i64 48
-;; @0034                               v3 = iadd v0, v2  ; v2 = 48
+;; @0034                               v2 = iconst.i64 64
+;; @0034                               v3 = iadd v0, v2  ; v2 = 64
 ;; @0034                               v4 = load.i32 notrap aligned region2 v3
 ;;                                     v76 = stack_addr.i64 ss0
 ;;                                     store notrap aligned region12 v4, v76
@@ -59,7 +59,7 @@
 ;; @0034                               brif v17, block4, block3
 ;;
 ;;                                 block3:
-;; @0034                               v18 = load.i64 notrap aligned readonly can_move region6 v0+32
+;; @0034                               v18 = load.i64 notrap aligned readonly can_move region6 v0+40
 ;; @0034                               v19 = load.i32 notrap aligned region7 v18
 ;; @0034                               v24 = iconst.i64 16
 ;; @0034                               v25 = iadd.i64 v14, v24  ; v24 = 16
@@ -115,8 +115,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
-;; @003b                               v3 = iconst.i64 48
-;; @003b                               v4 = iadd v0, v3  ; v3 = 48
+;; @003b                               v3 = iconst.i64 64
+;; @003b                               v4 = iadd v0, v3  ; v3 = 64
 ;; @003b                               v5 = load.i32 notrap aligned region2 v4
 ;; @003b                               v6 = iconst.i32 1
 ;; @003b                               v7 = band v2, v6  ; v6 = 1
@@ -140,7 +140,7 @@
 ;; @003b                               jump block3
 ;;
 ;;                                 block3:
-;;                                     v63 = iadd.i64 v0, v3  ; v3 = 48
+;;                                     v63 = iadd.i64 v0, v3  ; v3 = 64
 ;; @003b                               store.i32 notrap aligned region2 v2, v63
 ;;                                     v64 = iconst.i32 1
 ;;                                     v65 = band.i32 v5, v64  ; v64 = 1

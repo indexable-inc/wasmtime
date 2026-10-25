@@ -22,9 +22,9 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       cmpq    0x40(%rdi), %rsi
+;;       cmpq    0x48(%rdi), %rsi
 ;;       ja      0x23
-;;   10: addq    0x38(%rdi), %rsi
+;;   10: addq    0x40(%rdi), %rsi
 ;;       movl    $0xffff0000, %r8d
 ;;       movb    %cl, (%rsi, %r8)
 ;;       movq    %rbp, %rsp
@@ -36,9 +36,9 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       cmpq    0x40(%rdi), %rsi
+;;       cmpq    0x48(%rdi), %rsi
 ;;       ja      0x64
-;;   50: addq    0x38(%rdi), %rsi
+;;   50: addq    0x40(%rdi), %rsi
 ;;       movl    $0xffff0000, %r8d
 ;;       movzbq  (%rsi, %r8), %rax
 ;;       movq    %rbp, %rsp

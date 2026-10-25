@@ -29,7 +29,7 @@
 ;;       addq    $0xc, %rsp
 ;;       ╰─╼ stack_map: frame_size=48, frame_offsets=[12, 28]
 ;;       movq    0x1c(%rsp), %r14
-;;       movq    0x28(%r14), %rcx
+;;       movq    0x30(%r14), %rcx
 ;;       movl    4(%rcx), %ecx
 ;;       subq    $4, %rsp
 ;;       movl    %eax, (%rsp)

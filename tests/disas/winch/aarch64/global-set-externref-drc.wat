@@ -34,7 +34,7 @@
 ;;       ldur    x1, [x9, #8]
 ;;       ldur    x2, [x1, #0x28]
 ;;       ldur    x1, [x1, #0x20]
-;;       ldur    w3, [x9, #0x30]
+;;       ldur    w3, [x9, #0x40]
 ;;       tst     w0, w0
 ;;       b.eq    #0xbc
 ;;       b       #0x7c
@@ -54,7 +54,7 @@
 ;;       ldur    x5, [x4, #8]
 ;;       add     x5, x5, #1
 ;;       stur    x5, [x4, #8]
-;;       stur    w0, [x9, #0x30]
+;;       stur    w0, [x9, #0x40]
 ;;       tst     w3, w3
 ;;       b.eq    #0x148
 ;;       b       #0xcc

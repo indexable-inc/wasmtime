@@ -22,10 +22,10 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0020                               v2 = load.i32 notrap aligned region2 v0+48
+;; @0020                               v2 = load.i32 notrap aligned region2 v0+64
 ;; @0022                               v3 = iconst.i32 16
 ;; @0024                               v4 = isub v2, v3  ; v3 = 16
-;; @0025                               store notrap aligned region2 v4, v0+48
+;; @0025                               store notrap aligned region2 v4, v0+64
 ;; @0027                               jump block1
 ;;
 ;;                                 block1:

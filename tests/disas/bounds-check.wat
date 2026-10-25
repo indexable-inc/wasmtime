@@ -37,14 +37,14 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
 ;; @002a                               v3 = iconst.i32 0
-;; @002c                               v5 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @002c                               v5 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @002c                               v4 = uextend.i64 v2
 ;; @002c                               v6 = iadd v5, v4
 ;; @002c                               istore8 little region4 v3, v6  ; v3 = 0
 ;; @0033                               v11 = iconst.i64 0x07ff_ffff
 ;; @0033                               v12 = iadd v6, v11  ; v11 = 0x07ff_ffff
 ;; @0033                               istore8 little region4 v3, v12  ; v3 = 0
-;; @003d                               v15 = load.i64 notrap aligned region3 v0+64
+;; @003d                               v15 = load.i64 notrap aligned region3 v0+72
 ;; @003d                               v16 = icmp ugt v4, v15
 ;; @003d                               v21 = iconst.i64 0
 ;; @003d                               v19 = iconst.i64 0xffff_ffff

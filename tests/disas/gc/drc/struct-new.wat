@@ -15,7 +15,7 @@
 ;;     ss0 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 130 ""
+;;     region2 = 136 ""
 ;;     region3 = 6 ""
 ;;     region4 = 196 ""
 ;;     region5 = 147 ""
@@ -35,7 +35,7 @@
 ;;                                     v52 = stack_addr.i64 ss0
 ;;                                     store notrap aligned region10 v4, v52
 ;; @002a                               v6 = iconst.i32 -1342177280
-;; @002a                               v7 = load.i64 notrap aligned readonly can_move region2 v0+40
+;; @002a                               v7 = load.i64 notrap aligned readonly can_move region2 v0+48
 ;; @002a                               v8 = load.i32 notrap aligned readonly can_move region3 v7
 ;; @002a                               v5 = iconst.i32 40
 ;; @002a                               v9 = iconst.i32 8

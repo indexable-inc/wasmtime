@@ -67,8 +67,8 @@
 ;; @003b                               v16 = load.i32 notrap aligned region5 v12+56
 ;;                                     v75 = iconst.i32 0
 ;;                                     v65 = iconst.i32 3
-;; @003b                               v2 = iconst.i64 48
-;; @003b                               v3 = iadd.i64 v0, v2  ; v2 = 48
+;; @003b                               v2 = iconst.i64 64
+;; @003b                               v3 = iadd.i64 v0, v2  ; v2 = 64
 ;; @003b                               v26 = iconst.i32 1
 ;; @003b                               jump block4(v75)  ; v75 = 0
 ;;
@@ -82,7 +82,7 @@
 ;; @003b                               v22 = uextend.i64 v77
 ;; @003b                               v23 = iadd.i64 v15, v22
 ;; @003b                               v24 = load.i64 notrap aligned region6 v23
-;;                                     v78 = iadd.i64 v0, v2  ; v2 = 48
+;;                                     v78 = iadd.i64 v0, v2  ; v2 = 64
 ;;                                     v79 = icmp eq v24, v78
 ;;                                     v80 = iconst.i32 1
 ;;                                     v81 = iadd.i32 v18, v80  ; v80 = 1
@@ -237,8 +237,7 @@
 ;; @004e                               store notrap aligned region14 v40, v56+4  ; v40 = 1
 ;; @004e                               v58 = stack_addr.i64 ss0
 ;; @004e                               store notrap aligned region15 v58, v56+8
-;; @004e                               v59 = iconst.i64 48
-;; @004e                               v60 = iadd.i64 v0, v59  ; v59 = 48
+;; @004e                               v60 = iadd.i64 v0, v5  ; v5 = 64
 ;; @004e                               store notrap aligned region16 v60, v58
 ;; @004e                               store notrap aligned region17 v40, v56  ; v40 = 1
 ;; @004e                               store notrap aligned region12 v40, v34+56  ; v40 = 1

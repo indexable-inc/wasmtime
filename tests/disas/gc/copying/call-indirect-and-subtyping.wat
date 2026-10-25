@@ -20,7 +20,7 @@
 ;;     region1 = 160 ""
 ;;     region2 = 93 ""
 ;;     region3 = 117 ""
-;;     region4 = 130 ""
+;;     region4 = 136 ""
 ;;     region5 = 6 ""
 ;;     region6 = 106 ""
 ;;     region7 = 116 ""
@@ -39,7 +39,7 @@
 ;; @005c                               v3 = iconst.i32 2
 ;; @005c                               v4 = icmp uge v2, v3  ; v3 = 2
 ;; @005c                               v10 = iconst.i64 0
-;; @005c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+112
+;; @005c                               v6 = load.i64 notrap aligned readonly can_move region2 v0+120
 ;; @005c                               v5 = uextend.i64 v2
 ;; @005c                               v7 = iconst.i64 3
 ;; @005c                               v8 = ishl v5, v7  ; v7 = 3
@@ -57,7 +57,7 @@
 ;;
 ;;                                 block3(v15: i64):
 ;; @005c                               v21 = load.i32 user7 aligned readonly region6 v15+16
-;; @005c                               v19 = load.i64 notrap aligned readonly can_move region4 v0+40
+;; @005c                               v19 = load.i64 notrap aligned readonly can_move region4 v0+48
 ;; @005c                               v20 = load.i32 notrap aligned readonly can_move region5 v19
 ;; @005c                               v22 = icmp eq v21, v20
 ;; @005c                               v23 = uextend.i32 v22

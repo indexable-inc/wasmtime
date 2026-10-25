@@ -19,8 +19,8 @@
 ;;     region2 = 196 ""
 ;;     region3 = 206 ""
 ;;     region4 = 108 ""
-;;     region5 = 90 ""
-;;     region6 = 136 ""
+;;     region5 = 133 ""
+;;     region6 = 240 ""
 ;;     gv0 = vmctx
 ;;     gv1 = load.i64 notrap aligned readonly can_move region0 gv0+8
 ;;     gv2 = load.i64 notrap aligned region1 gv1+24
@@ -43,13 +43,13 @@
 ;; @002a                               v13 = uextend.i64 v12
 ;; @002a                               v19 = icmp ugt v18, v13
 ;; @002a                               trapnz v19, user17
-;; @002a                               v30 = load.i32 notrap aligned region5 v0+56
+;; @002a                               v30 = load.i32 notrap aligned region5 v0+72
 ;; @002a                               v32 = uextend.i64 v4
 ;; @002a                               v36 = iadd v32, v15
 ;; @002a                               v31 = uextend.i64 v30
 ;; @002a                               v37 = icmp ugt v36, v31
 ;; @002a                               trapnz v37, heap_oob
-;; @002a                               v38 = load.i64 notrap aligned region6 v0+48
+;; @002a                               v38 = load.i64 notrap aligned region6 v0+64
 ;; @002a                               v49 = load.i64 notrap aligned region3 v7+40
 ;; @002a                               v24 = iconst.i64 20
 ;; @002a                               v25 = iadd v9, v24  ; v24 = 20

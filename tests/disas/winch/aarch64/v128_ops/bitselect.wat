@@ -32,7 +32,7 @@
 ;;       mov     v3.16b, v0.16b
 ;;       bsl     v3.16b, v2.16b, v1.16b
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x38]
+;;       ldur    x1, [x9, #0x40]
 ;;       add     x1, x1, w0, uxtw
 ;;       stur    q3, [x1]
 ;;       add     x28, x28, #0x10

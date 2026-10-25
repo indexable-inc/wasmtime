@@ -18,7 +18,7 @@
 ;;       subq    $0x10, %rsp
 ;;       movq    %rdi, 8(%rsp)
 ;;       movq    %rsi, (%rsp)
-;;       movl    0x30(%r14), %eax
+;;       movl    0x40(%r14), %eax
 ;;       subq    $4, %rsp
 ;;       movl    %eax, (%rsp)
 ;;       movl    (%rsp), %eax
@@ -41,7 +41,7 @@
 ;;       andl    $2, %r11d
 ;;       testl   %r11d, %r11d
 ;;       jne     0xff
-;;   93: movq    0x20(%r14), %rbx
+;;   93: movq    0x28(%r14), %rbx
 ;;       movl    (%rbx), %r11d
 ;;       movl    %r11d, 0x10(%rdx)
 ;;       movl    (%rdx), %r11d

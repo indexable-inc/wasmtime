@@ -32,7 +32,7 @@
 ;;       mov     x0, x9
 ;;       bl      #0x284
 ;;   5c: ldur    x9, [x28, #0x18]
-;;       ldur    x1, [x9, #0x28]
+;;       ldur    x1, [x9, #0x30]
 ;;       ldur    w1, [x1, #4]
 ;;       sub     x28, x28, #4
 ;;       mov     sp, x28

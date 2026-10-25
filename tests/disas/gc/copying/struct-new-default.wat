@@ -13,10 +13,10 @@
 ;; function u0:0(i64 vmctx, i64) -> i32 tail {
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 177 ""
 ;;     region4 = 98 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 196 ""
 ;;     region8 = 239 ""
@@ -33,7 +33,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0021                               v6 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0021                               v6 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0021                               v7 = load.i32 notrap aligned region3 v6
 ;; @0021                               v8 = load.i32 notrap aligned region4 v6+4
 ;; @0021                               v14 = uextend.i64 v7
@@ -52,7 +52,7 @@
 ;;                                     v62 = load.i64 notrap aligned readonly can_move region7 v61+32
 ;; @0021                               v31 = iadd v62, v14
 ;; @0021                               store user2 region8 v60, v31  ; v60 = -1342177246
-;;                                     v63 = load.i64 notrap aligned readonly can_move region5 v0+40
+;;                                     v63 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;;                                     v64 = load.i32 notrap aligned readonly can_move region6 v63
 ;; @0021                               store user2 region9 v64, v31+4
 ;;                                     v65 = iconst.i64 32
@@ -61,7 +61,7 @@
 ;;
 ;;                                 block3 cold:
 ;; @0021                               v18 = iconst.i32 -1342177246
-;; @0021                               v19 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0021                               v19 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0021                               v20 = load.i32 notrap aligned readonly can_move region6 v19
 ;; @0021                               v5 = iconst.i32 32
 ;; @0021                               v21 = iconst.i32 16

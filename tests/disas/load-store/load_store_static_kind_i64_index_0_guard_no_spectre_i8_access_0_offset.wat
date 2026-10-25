@@ -33,7 +33,7 @@
 ;; @0040                               v4 = iconst.i64 0xffff_ffff
 ;; @0040                               v5 = icmp ugt v2, v4  ; v4 = 0xffff_ffff
 ;; @0040                               trapnz v5, heap_oob
-;; @0040                               v6 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0040                               v6 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0040                               v7 = iadd v6, v2
 ;; @0040                               istore8 little region4 v3, v7
 ;; @0043                               jump block1
@@ -57,7 +57,7 @@
 ;; @0048                               v3 = iconst.i64 0xffff_ffff
 ;; @0048                               v4 = icmp ugt v2, v3  ; v3 = 0xffff_ffff
 ;; @0048                               trapnz v4, heap_oob
-;; @0048                               v5 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0048                               v5 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0048                               v6 = iadd v5, v2
 ;; @0048                               v7 = uload8.i32 little region4 v6
 ;; @004b                               jump block1

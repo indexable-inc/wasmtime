@@ -184,12 +184,12 @@
 ;;
 ;;                                 block2:
 ;; @009b                               v3 = iconst.i32 1
-;; @009d                               store notrap aligned region2 v3, v0+48  ; v3 = 1
+;; @009d                               store notrap aligned region2 v3, v0+64  ; v3 = 1
 ;; @009f                               jump block3
 ;;
 ;;                                 block4 cold:
 ;; @00a0                               v4 = iconst.i32 2
-;; @00a2                               store notrap aligned region2 v4, v0+48  ; v4 = 2
+;; @00a2                               store notrap aligned region2 v4, v0+64  ; v4 = 2
 ;; @00a4                               jump block3
 ;;
 ;;                                 block3:

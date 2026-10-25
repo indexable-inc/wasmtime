@@ -44,18 +44,18 @@
 ;;       movq    %rsi, 0x20(%rsp)
 ;;       movdqu  %xmm0, 0x10(%rsp)
 ;;       movq    %rdx, 8(%rsp)
-;;       movss   0x50(%r14), %xmm0
-;;       movss   0x40(%r14), %xmm1
-;;       movss   0x50(%r14), %xmm2
-;;       movss   0x50(%r14), %xmm3
-;;       movss   0x50(%r14), %xmm4
-;;       movss   0x50(%r14), %xmm5
-;;       movss   0x40(%r14), %xmm6
-;;       movss   0x50(%r14), %xmm7
-;;       movss   0x50(%r14), %xmm8
-;;       movss   0x40(%r14), %xmm9
-;;       movss   0x50(%r14), %xmm10
-;;       movss   0x50(%r14), %xmm11
+;;       movss   0x60(%r14), %xmm0
+;;       movss   0x50(%r14), %xmm1
+;;       movss   0x60(%r14), %xmm2
+;;       movss   0x60(%r14), %xmm3
+;;       movss   0x60(%r14), %xmm4
+;;       movss   0x60(%r14), %xmm5
+;;       movss   0x50(%r14), %xmm6
+;;       movss   0x60(%r14), %xmm7
+;;       movss   0x60(%r14), %xmm8
+;;       movss   0x50(%r14), %xmm9
+;;       movss   0x60(%r14), %xmm10
+;;       movss   0x60(%r14), %xmm11
 ;;       movdqu  0x10(%rsp), %xmm12
 ;;       vpand   0x13e(%rip), %xmm12, %xmm15
 ;;       vpsrlw  $4, %xmm12, %xmm12
@@ -64,8 +64,8 @@
 ;;       vpshufb %xmm12, %xmm13, %xmm12
 ;;       vpshufb %xmm15, %xmm13, %xmm15
 ;;       vpaddb  %xmm15, %xmm12, %xmm12
-;;       movss   0x40(%r14), %xmm13
-;;       movdqu  0x60(%r14), %xmm14
+;;       movss   0x50(%r14), %xmm13
+;;       movdqu  0x70(%r14), %xmm14
 ;;       movdqu  0x10(%rsp), %xmm15
 ;;       subq    $0x10, %rsp
 ;;       movdqu  %xmm15, (%rsp)

@@ -62,8 +62,8 @@
 ;;                                     jump block4
 ;;
 ;;                                 block4:
-;; @00d4                               v2 = load.i64 notrap aligned readonly can_move region2 v0+72
-;;                                     v6 = load.i64 notrap aligned readonly can_move region2 v2+72
+;; @00d4                               v2 = load.i64 notrap aligned readonly can_move region2 v0+80
+;;                                     v6 = load.i64 notrap aligned readonly can_move region2 v2+80
 ;;                                     call fn2(v6, v6)
 ;;                                     jump block5
 ;;

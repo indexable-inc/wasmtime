@@ -27,7 +27,7 @@
 ;;       fmov    s31, #1.50000000
 ;;       mov     v0.s[2], v31.s[0]
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x38]
+;;       ldur    x1, [x9, #0x40]
 ;;       add     x1, x1, w0, uxtw
 ;;       stur    q0, [x1]
 ;;       add     x28, x28, #0x10

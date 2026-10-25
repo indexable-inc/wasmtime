@@ -77,7 +77,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0073                               v4 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0073                               v4 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0073                               v6 = load.i32 little region4 v4
 ;; @0076                               jump block1
 ;;
@@ -116,8 +116,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0080                               v3 = load.i64 notrap aligned region3 v0+80
-;; @0080                               v7 = load.i64 notrap aligned region2 v0+72
+;; @0080                               v3 = load.i64 notrap aligned region3 v0+88
+;; @0080                               v7 = load.i64 notrap aligned region2 v0+80
 ;; @0080                               v4 = ireduce.i32 v3
 ;; @007e                               v2 = iconst.i32 0
 ;;                                     v21 = icmp eq v4, v2  ; v2 = 0
@@ -153,7 +153,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0100                               v4 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @0100                               v4 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @0100                               v6 = load.i32 little region4 v4
 ;; @0103                               jump block1
 ;;
@@ -192,8 +192,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @010d                               v3 = load.i64 notrap aligned region3 v0+80
-;; @010d                               v7 = load.i64 notrap aligned region2 v0+72
+;; @010d                               v3 = load.i64 notrap aligned region3 v0+88
+;; @010d                               v7 = load.i64 notrap aligned region2 v0+80
 ;; @010d                               v4 = ireduce.i32 v3
 ;; @010b                               v2 = iconst.i32 0
 ;;                                     v21 = icmp eq v4, v2  ; v2 = 0
@@ -230,7 +230,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0183                               v4 = load.i64 notrap aligned readonly can_move region2 v0+48
+;; @0183                               v4 = load.i64 notrap aligned readonly can_move region2 v0+56
 ;; @0183                               v5 = load.i64 notrap aligned readonly can_move region3 v4
 ;; @0183                               v7 = load.i32 little region5 v5
 ;; @0186                               jump block1
@@ -250,7 +250,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0189                               v2 = load.i64 notrap aligned readonly can_move region2 v0+96
+;; @0189                               v2 = load.i64 notrap aligned readonly can_move region2 v0+104
 ;; @0189                               v3 = load.i32 notrap aligned region3 v2
 ;; @018b                               jump block1
 ;;
@@ -273,7 +273,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0190                               v3 = load.i64 notrap aligned readonly can_move region2 v0+72
+;; @0190                               v3 = load.i64 notrap aligned readonly can_move region2 v0+80
 ;; @0190                               v4 = load.i64 notrap aligned region4 v3+8
 ;; @0190                               v9 = load.i64 notrap aligned region3 v3
 ;; @0190                               v5 = ireduce.i32 v4

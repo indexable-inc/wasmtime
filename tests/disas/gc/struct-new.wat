@@ -15,10 +15,10 @@
 ;;     ss0 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 177 ""
 ;;     region4 = 98 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 196 ""
 ;;     region8 = 239 ""
@@ -38,7 +38,7 @@
 ;;                                 block0(v0: i64, v1: i64, v2: f32, v3: i32, v4: i32):
 ;;                                     v45 = stack_addr.i64 ss0
 ;;                                     store notrap aligned region14 v4, v45
-;; @002a                               v6 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @002a                               v6 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @002a                               v7 = load.i32 notrap aligned region3 v6
 ;; @002a                               v8 = load.i32 notrap aligned region4 v6+4
 ;; @002a                               v14 = uextend.i64 v7
@@ -57,7 +57,7 @@
 ;;                                     v65 = load.i64 notrap aligned readonly can_move region7 v64+32
 ;; @002a                               v31 = iadd v65, v14
 ;; @002a                               store user2 region8 v63, v31  ; v63 = -1342177246
-;;                                     v66 = load.i64 notrap aligned readonly can_move region5 v0+40
+;;                                     v66 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;;                                     v67 = load.i32 notrap aligned readonly can_move region6 v66
 ;; @002a                               store user2 region9 v67, v31+4
 ;;                                     v68 = iconst.i64 32
@@ -66,7 +66,7 @@
 ;;
 ;;                                 block3 cold:
 ;; @002a                               v18 = iconst.i32 -1342177246
-;; @002a                               v19 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @002a                               v19 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @002a                               v20 = load.i32 notrap aligned readonly can_move region6 v19
 ;; @002a                               v5 = iconst.i32 32
 ;; @002a                               v21 = iconst.i32 16

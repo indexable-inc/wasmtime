@@ -39,7 +39,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64):
-;; @0082                               v2 = load.i64 notrap aligned readonly can_move region2 v0+72
+;; @0082                               v2 = load.i64 notrap aligned readonly can_move region2 v0+80
 ;; @0082                               call fn0(v2, v0)
 ;; @0084                               call fn1(v2, v0)
 ;; @0086                               call fn2(v2, v0)

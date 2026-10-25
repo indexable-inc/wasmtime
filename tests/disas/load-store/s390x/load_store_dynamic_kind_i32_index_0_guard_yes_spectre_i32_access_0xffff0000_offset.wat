@@ -33,9 +33,9 @@
 ;;       algfr   %r2, %r4
 ;;       jgnle   0x3c
 ;;       lgr     %r6, %r3
-;;       lg      %r4, 0x40(%r6)
+;;       lg      %r4, 0x48(%r6)
 ;;       lghi    %r3, 0
-;;       ag      %r7, 0x38(%r6)
+;;       ag      %r7, 0x40(%r6)
 ;;       llilh   %r6, 0xffff
 ;;       agrk    %r6, %r7, %r6
 ;;       clgr    %r2, %r4
@@ -59,9 +59,9 @@
 ;;       algfr   %r2, %r4
 ;;       jgnle   0xb0
 ;;       lgr     %r5, %r3
-;;       lg      %r4, 0x40(%r5)
+;;       lg      %r4, 0x48(%r5)
 ;;       lghi    %r3, 0
-;;       ag      %r7, 0x38(%r5)
+;;       ag      %r7, 0x40(%r5)
 ;;       llilh   %r5, 0xffff
 ;;       agrk    %r5, %r7, %r5
 ;;       clgr    %r2, %r4

@@ -13,7 +13,7 @@
 ;; wasm[0]::function[0]::load8:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x38(%rdi), %rsi
+;;       movq    0x40(%rdi), %rsi
 ;;       ╰─╼ addrmap: 0x21
 ;;       movl    %edx, %edi
 ;;       movzbq  (%rsi, %rdi), %rax

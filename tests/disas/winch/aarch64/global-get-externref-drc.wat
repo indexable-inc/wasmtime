@@ -23,7 +23,7 @@
 ;;       mov     sp, x28
 ;;       stur    x0, [x28, #8]
 ;;       stur    x1, [x28]
-;;       ldur    w0, [x9, #0x30]
+;;       ldur    w0, [x9, #0x40]
 ;;       sub     x28, x28, #4
 ;;       mov     sp, x28
 ;;       stur    w0, [x28]
@@ -52,7 +52,7 @@
 ;;       tst     w16, w16
 ;;       b.ne    #0x124
 ;;       b       #0xb4
-;;   b4: ldur    x3, [x9, #0x20]
+;;   b4: ldur    x3, [x9, #0x28]
 ;;       ldur    w16, [x3]
 ;;       stur    w16, [x2, #0x10]
 ;;       ldur    w16, [x2]

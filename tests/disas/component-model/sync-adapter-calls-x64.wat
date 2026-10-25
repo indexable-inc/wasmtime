@@ -54,8 +54,8 @@
 ;; wasm[1]::function[1]:
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
-;;       movq    0x48(%rdi), %rdi
-;;       movq    0xa8(%rdi), %rdi
+;;       movq    0x50(%rdi), %rdi
+;;       movq    0xb0(%rdi), %rdi
 ;;       movl    (%rdi), %edi
 ;;       testl   %edi, %edi
 ;;       je      0x43

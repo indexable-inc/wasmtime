@@ -27,7 +27,7 @@
 ;;       movq    8(%r14), %rcx
 ;;       movq    0x28(%rcx), %rdx
 ;;       movq    0x20(%rcx), %rcx
-;;       movl    0x30(%r14), %ebx
+;;       movl    0x40(%r14), %ebx
 ;;       testl   %eax, %eax
 ;;       je      0xa1
 ;;   66: movl    %eax, %r11d
@@ -43,7 +43,7 @@
 ;;       movq    8(%rsi), %rdi
 ;;       addq    $1, %rdi
 ;;       movq    %rdi, 8(%rsi)
-;;       movl    %eax, 0x30(%r14)
+;;       movl    %eax, 0x40(%r14)
 ;;       testl   %ebx, %ebx
 ;;       je      0x120
 ;;   ad: movl    %ebx, %r11d

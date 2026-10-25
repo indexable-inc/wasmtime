@@ -27,7 +27,7 @@
 ;;       callq   0x277
 ;;       addq    $8, %rsp
 ;;       movq    0x20(%rsp), %r14
-;;       movq    0x20(%r14), %r11
+;;       movq    0x28(%r14), %r11
 ;;       movl    (%r11), %ecx
 ;;       addl    $7, %ecx
 ;;       jb      0x1a1
@@ -64,10 +64,10 @@
 ;;       movq    %rcx, %rdx
 ;;       addq    %rax, %rdx
 ;;       movl    $0x4000018, (%rdx)
-;;       movq    0x28(%r14), %r11
+;;       movq    0x30(%r14), %r11
 ;;       movl    4(%r11), %r11d
 ;;       movl    %r11d, 4(%rdx)
-;;       movq    0x20(%r14), %rcx
+;;       movq    0x28(%r14), %rcx
 ;;       movl    %eax, %r11d
 ;;       addl    $0x18, %r11d
 ;;       movl    %r11d, (%rcx)

@@ -144,7 +144,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0048                               v11 = load.i64 notrap aligned readonly can_move region2 v0+48
+;; @0048                               v11 = load.i64 notrap aligned readonly can_move region2 v0+56
 ;;                                     v62 = iconst.i64 8
 ;; @0048                               v14 = iadd v11, v62  ; v62 = 8
 ;; @0048                               v17 = load.i64 user6 aligned region3 v14
@@ -202,7 +202,7 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @0075                               v11 = load.i64 notrap aligned readonly can_move region2 v0+48
+;; @0075                               v11 = load.i64 notrap aligned readonly can_move region2 v0+56
 ;;                                     v62 = iconst.i64 8
 ;; @0075                               v14 = iadd v11, v62  ; v62 = 8
 ;; @0075                               v17 = load.i64 user6 aligned region3 v14
@@ -258,11 +258,11 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32, v4: i32, v5: i32):
-;; @009e                               v7 = load.i64 notrap aligned region2 v0+64
+;; @009e                               v7 = load.i64 notrap aligned region2 v0+80
 ;; @00a0                               v8 = load.i64 user16 aligned readonly region3 v7+8
 ;; @00a0                               v9 = load.i64 notrap aligned readonly region4 v7+24
 ;; @00a0                               v10 = call_indirect sig0, v8(v9, v0, v2, v3, v4, v5)
-;; @00af                               v12 = load.i64 notrap aligned region5 v0+80
+;; @00af                               v12 = load.i64 notrap aligned region5 v0+96
 ;; @00b1                               v13 = load.i64 user16 aligned readonly region3 v12+8
 ;; @00b1                               v14 = load.i64 notrap aligned readonly region4 v12+24
 ;; @00b1                               v15 = call_indirect sig0, v13(v14, v0, v2, v3, v4, v5)

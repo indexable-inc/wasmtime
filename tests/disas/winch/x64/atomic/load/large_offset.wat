@@ -29,14 +29,14 @@
 ;;       cmpl    $0, %eax
 ;;       jne     0x9e
 ;;   4f: movl    0xc(%rsp), %eax
-;;       movq    0x40(%r14), %rcx
+;;       movq    0x48(%r14), %rcx
 ;;       movl    %eax, %edx
 ;;       movl    $0x80000002, %r11d
 ;;       addq    %r11, %rdx
 ;;       jb      0xa0
 ;;   68: cmpq    %rcx, %rdx
 ;;       ja      0xa2
-;;   71: movq    0x38(%r14), %rbx
+;;   71: movq    0x40(%r14), %rbx
 ;;       movl    %eax, %eax
 ;;       addq    %rax, %rbx
 ;;       movl    $0x80000000, %r11d

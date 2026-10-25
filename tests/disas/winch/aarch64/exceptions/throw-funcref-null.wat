@@ -32,7 +32,7 @@
 ;;       mov     x0, x9
 ;;       bl      #0x308
 ;;   5c: ldur    x9, [x28, #0x18]
-;;       ldur    x16, [x9, #0x20]
+;;       ldur    x16, [x9, #0x28]
 ;;       ldur    w1, [x16]
 ;;       adds    w1, w1, #7
 ;;       b.hs    #0x204
@@ -79,10 +79,10 @@
 ;;       mov     w16, #0x18
 ;;       movk    w16, #0x400, lsl #16
 ;;       stur    w16, [x2]
-;;       ldur    x16, [x9, #0x28]
+;;       ldur    x16, [x9, #0x30]
 ;;       ldur    w16, [x16, #4]
 ;;       stur    w16, [x2, #4]
-;;       ldur    x1, [x9, #0x20]
+;;       ldur    x1, [x9, #0x28]
 ;;       mov     w16, w0
 ;;       add     w16, w16, #0x18
 ;;       stur    w16, [x1]

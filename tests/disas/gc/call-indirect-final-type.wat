@@ -21,7 +21,7 @@
 ;;     region2 = 93 ""
 ;;     region3 = 211 ""
 ;;     region4 = 117 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 106 ""
 ;;     region8 = 116 ""
@@ -35,8 +35,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
-;; @002b                               v4 = load.i64 notrap aligned region3 v0+56
-;; @002b                               v8 = load.i64 notrap aligned region2 v0+48
+;; @002b                               v4 = load.i64 notrap aligned region3 v0+64
+;; @002b                               v8 = load.i64 notrap aligned region2 v0+56
 ;; @002b                               v5 = ireduce.i32 v4
 ;; @002b                               v6 = icmp uge v3, v5
 ;; @002b                               v12 = iconst.i64 0
@@ -57,7 +57,7 @@
 ;;
 ;;                                 block3(v17: i64):
 ;; @002b                               v23 = load.i32 user7 aligned readonly region7 v17+16
-;; @002b                               v21 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @002b                               v21 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @002b                               v22 = load.i32 notrap aligned readonly can_move region6 v21
 ;; @002b                               v24 = icmp eq v23, v22
 ;; @002b                               trapz v24, user8
@@ -76,7 +76,7 @@
 ;;     region2 = 93 ""
 ;;     region3 = 211 ""
 ;;     region4 = 117 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 106 ""
 ;;     region8 = 116 ""
@@ -90,8 +90,8 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
-;; @0035                               v4 = load.i64 notrap aligned region3 v0+56
-;; @0035                               v8 = load.i64 notrap aligned region2 v0+48
+;; @0035                               v4 = load.i64 notrap aligned region3 v0+64
+;; @0035                               v8 = load.i64 notrap aligned region2 v0+56
 ;; @0035                               v5 = ireduce.i32 v4
 ;; @0035                               v6 = icmp uge v3, v5
 ;; @0035                               v12 = iconst.i64 0
@@ -112,7 +112,7 @@
 ;;
 ;;                                 block3(v17: i64):
 ;; @0035                               v23 = load.i32 user7 aligned readonly region7 v17+16
-;; @0035                               v21 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0035                               v21 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0035                               v22 = load.i32 notrap aligned readonly can_move region6 v21
 ;; @0035                               v24 = icmp eq v23, v22
 ;; @0035                               trapz v24, user8

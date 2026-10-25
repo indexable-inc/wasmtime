@@ -15,11 +15,11 @@
 ;;     ss2 = explicit_slot 4, align = 4
 ;;     region0 = 123 ""
 ;;     region1 = 160 ""
-;;     region2 = 65 ""
+;;     region2 = 130 ""
 ;;     region3 = 237 ""
 ;;     region4 = 206 ""
 ;;     region5 = 196 ""
-;;     region6 = 130 ""
+;;     region6 = 136 ""
 ;;     region7 = 6 ""
 ;;     region8 = 239 ""
 ;;     region9 = 134 ""
@@ -42,7 +42,7 @@
 ;;                                     store notrap aligned region13 v3, v132
 ;;                                     v133 = stack_addr.i64 ss0
 ;;                                     store notrap aligned region12 v4, v133
-;; @0025                               v17 = load.i64 notrap aligned readonly can_move region2 v0+32
+;; @0025                               v17 = load.i64 notrap aligned readonly can_move region2 v0+40
 ;; @0025                               v18 = load.i32 notrap aligned region3 v17
 ;;                                     v151 = iconst.i32 7
 ;; @0025                               v21 = uadd_overflow_trap v18, v151, user18  ; v151 = 7
@@ -63,7 +63,7 @@
 ;;                                     v254 = uextend.i64 v253
 ;; @0025                               v34 = iadd v32, v254
 ;; @0025                               store user2 region8 v158, v34  ; v158 = -1476394984
-;; @0025                               v37 = load.i64 notrap aligned readonly can_move region6 v0+40
+;; @0025                               v37 = load.i64 notrap aligned readonly can_move region6 v0+48
 ;; @0025                               v38 = load.i32 notrap aligned readonly can_move region7 v37
 ;; @0025                               store user2 region9 v38, v34+4
 ;; @0025                               store.i32 notrap aligned region3 v24, v17

@@ -29,7 +29,7 @@
 ;;       ldr     q1, #0x90
 ;;       sub     v1.2d, v1.2d, v0.2d
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x38]
+;;       ldur    x1, [x9, #0x40]
 ;;       add     x1, x1, w0, uxtw
 ;;       stur    q1, [x1]
 ;;       add     x28, x28, #0x10

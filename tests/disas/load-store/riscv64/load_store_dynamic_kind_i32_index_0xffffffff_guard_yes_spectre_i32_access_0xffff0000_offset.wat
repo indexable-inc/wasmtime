@@ -23,8 +23,8 @@
 ;;       sd      ra, 8(sp)
 ;;       sd      s0, 0(sp)
 ;;       mv      s0, sp
-;;       ld      a5, 0x40(a0)
-;;       ld      a0, 0x38(a0)
+;;       ld      a5, 0x48(a0)
+;;       ld      a0, 0x40(a0)
 ;;       slli    a4, a2, 0x20
 ;;       srli    a1, a4, 0x20
 ;;       sltu    a5, a5, a1
@@ -46,8 +46,8 @@
 ;;       sd      ra, 8(sp)
 ;;       sd      s0, 0(sp)
 ;;       mv      s0, sp
-;;       ld      a5, 0x40(a0)
-;;       ld      a0, 0x38(a0)
+;;       ld      a5, 0x48(a0)
+;;       ld      a0, 0x40(a0)
 ;;       slli    a4, a2, 0x20
 ;;       srli    a1, a4, 0x20
 ;;       sltu    a5, a5, a1

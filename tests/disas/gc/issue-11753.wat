@@ -36,7 +36,7 @@
 ;;       movq    %r13, 0x20(%rsp)
 ;;       movq    %r14, 0x28(%rsp)
 ;;       movq    %r15, 0x30(%rsp)
-;;       movq    0x20(%rdi), %rsi
+;;       movq    0x28(%rdi), %rsi
 ;;       movl    (%rsi), %eax
 ;;       movl    %eax, %ecx
 ;;       leaq    0x20(%rcx), %rdx
@@ -52,7 +52,7 @@
 ;;       leaq    (%rdi, %rcx), %rsi
 ;;       movl    $0xb0000002, (%rdi, %rcx)
 ;;       ╰─╼ trap: GcHeapCorrupt
-;;       movq    0x28(%r9), %r8
+;;       movq    0x30(%r9), %r8
 ;;       movl    (%r8), %r8d
 ;;       movl    %r8d, 4(%rdi, %rcx)
 ;;       ╰─╼ trap: GcHeapCorrupt
@@ -63,8 +63,8 @@
 ;;       movl    $0x2a, 0x10(%rsi)
 ;;       ╰─╼ trap: GcHeapCorrupt
 ;;       movq    8(%rsp), %r9
-;;       movq    0x38(%r9), %rax
-;;       movq    0x48(%r9), %rdi
+;;       movq    0x40(%r9), %rax
+;;       movq    0x50(%r9), %rdi
 ;;       movq    8(%rsp), %rsi
 ;;       callq   *%rax
 ;;       ├─╼ exception frame offset: SP = FP - 0x40
@@ -89,7 +89,7 @@
 ;;       popq    %rbp
 ;;       retq
 ;;   e6: movl    $0xb0000002, %esi
-;;   eb: movq    0x28(%rdi), %rax
+;;   eb: movq    0x30(%rdi), %rax
 ;;   ef: movq    %rdi, 8(%rsp)
 ;;   f4: movl    (%rax), %edx
 ;;   f6: movl    $0x20, %ecx

@@ -86,8 +86,8 @@
 ;; @003e                               v22 = iconst.i64 1
 ;; @003e                               v23 = iadd v20, v22  ; v22 = 1
 ;; @003e                               store notrap aligned region2 v23, v15+104
-;; @003e                               v24 = iconst.i64 48
-;; @003e                               v25 = iadd v0, v24  ; v24 = 48
+;; @003e                               v24 = iconst.i64 64
+;; @003e                               v25 = iadd v0, v24  ; v24 = 64
 ;; @003e                               v26 = load.i64 notrap aligned readonly can_move region0 v0+8
 ;; @003e                               v27 = load.i64 notrap aligned region3 v26+88
 ;; @003e                               v28 = load.i64 notrap aligned region3 v26+96
@@ -403,8 +403,8 @@
 ;; @004b                               v51 = stack_addr.i64 ss0
 ;; @004b                               store notrap aligned region14 v50, v49+4  ; v50 = 1
 ;; @004b                               store notrap aligned region15 v51, v49+8
-;; @004b                               v52 = iconst.i64 48
-;; @004b                               v53 = iadd.i64 v0, v52  ; v52 = 48
+;; @004b                               v52 = iconst.i64 64
+;; @004b                               v53 = iadd.i64 v0, v52  ; v52 = 64
 ;; @004b                               v54 = iconst.i32 1
 ;; @004b                               v55 = load.i64 notrap aligned region15 v49+8
 ;; @004b                               store notrap aligned region16 v53, v55

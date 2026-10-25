@@ -17,10 +17,10 @@
 )
 ;; wasm[0]::function[0]:
 ;;       push_frame
-;;       xload64be_o32 x4, x0, 64
+;;       xload64be_o32 x4, x0, 72
 ;;       br_if_xult64_u8 x4, 16, 0x2b    // target = 0x35
 ;;       br_if_xult64_u8 x4, 32, 0x27    // target = 0x38
-;;   18: xload64be_o32 x6, x0, 56
+;;   18: xload64be_o32 x6, x0, 64
 ;;       vload128le_o32 v6, x6, 16
 ;;       vstore128le_o32 x6, 0, v6
 ;;       pop_frame

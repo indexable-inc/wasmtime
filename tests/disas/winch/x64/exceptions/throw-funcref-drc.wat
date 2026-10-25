@@ -27,7 +27,7 @@
 ;;       callq   0x208
 ;;       addq    $8, %rsp
 ;;       movq    0x20(%rsp), %r14
-;;       movq    0x28(%r14), %rcx
+;;       movq    0x30(%r14), %rcx
 ;;       movl    4(%rcx), %ecx
 ;;       subq    $4, %rsp
 ;;       movl    %eax, (%rsp)

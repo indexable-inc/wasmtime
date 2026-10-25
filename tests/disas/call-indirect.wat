@@ -13,7 +13,7 @@
 ;;     region2 = 93 ""
 ;;     region3 = 211 ""
 ;;     region4 = 99 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 191 ""
 ;;     region7 = 106 ""
 ;;     region8 = 116 ""
@@ -27,11 +27,11 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
-;; @0035                               v4 = load.i64 notrap aligned region3 v0+56
+;; @0035                               v4 = load.i64 notrap aligned region3 v0+64
 ;; @0035                               v5 = ireduce.i32 v4
 ;; @0035                               v6 = icmp uge v3, v5
 ;; @0035                               v7 = uextend.i64 v3
-;; @0035                               v8 = load.i64 notrap aligned region2 v0+48
+;; @0035                               v8 = load.i64 notrap aligned region2 v0+56
 ;; @0035                               v9 = iconst.i64 3
 ;; @0035                               v10 = ishl v7, v9  ; v9 = 3
 ;; @0035                               v11 = iadd v8, v10
@@ -49,7 +49,7 @@
 ;; @0035                               jump block3(v20)
 ;;
 ;;                                 block3(v17: i64):
-;; @0035                               v21 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @0035                               v21 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @0035                               v22 = load.i32 notrap aligned readonly can_move region6 v21+4
 ;; @0035                               v23 = load.i32 user7 aligned readonly region7 v17+16
 ;; @0035                               v24 = icmp eq v23, v22

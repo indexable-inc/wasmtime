@@ -44,8 +44,8 @@
 ;;       subq    $0x10, %rsp
 ;;       movq    %rdi, 8(%rsp)
 ;;       movq    %rsi, (%rsp)
-;;       movq    0x48(%r14), %rdx
-;;       movq    0x38(%r14), %rcx
+;;       movq    0x50(%r14), %rdx
+;;       movq    0x40(%r14), %rcx
 ;;       movq    %rdx, %rdi
 ;;       movq    %r14, %rsi
 ;;       callq   *%rcx

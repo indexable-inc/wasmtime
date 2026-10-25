@@ -28,7 +28,7 @@
 ;;     region4 = 147 ""
 ;;     region5 = 175 ""
 ;;     region6 = 239 ""
-;;     region7 = 65 ""
+;;     region7 = 130 ""
 ;;     region8 = 210 ""
 ;;     region9 = 121 ""
 ;;     region10 = 115 ""
@@ -131,7 +131,7 @@
 ;; @0035                               brif v77, block10, block9
 ;;
 ;;                                 block9:
-;; @0035                               v78 = load.i64 notrap aligned readonly can_move region7 v0+32
+;; @0035                               v78 = load.i64 notrap aligned readonly can_move region7 v0+40
 ;; @0035                               v79 = load.i32 notrap aligned region8 v78
 ;; @0035                               v84 = iconst.i64 16
 ;; @0035                               v85 = iadd.i64 v74, v84  ; v84 = 16

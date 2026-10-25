@@ -62,7 +62,7 @@
 ;;
 ;;                                 block4:
 ;; @004b                               v6 = uextend.i64 v3  ; v3 = 35
-;; @004b                               v7 = load.i64 notrap aligned readonly can_move region2 v0+56
+;; @004b                               v7 = load.i64 notrap aligned readonly can_move region2 v0+64
 ;; @004b                               v8 = iadd v7, v6
 ;; @004b                               v9 = sload16.i64 little region4 v8
 ;; @004e                               trap user12

@@ -32,10 +32,10 @@
 ;;                                 block0(v0: i64, v1: i64, v2: i64, v3: i32):
 ;; @0040                               v4 = iconst.i64 0xffff_0004
 ;; @0040                               v5 = uadd_overflow_trap v2, v4, heap_oob  ; v4 = 0xffff_0004
-;; @0040                               v6 = load.i64 notrap aligned region3 v0+64
+;; @0040                               v6 = load.i64 notrap aligned region3 v0+72
 ;; @0040                               v7 = icmp ugt v5, v6
 ;; @0040                               trapnz v7, heap_oob
-;; @0040                               v8 = load.i64 notrap aligned can_move region2 v0+56
+;; @0040                               v8 = load.i64 notrap aligned can_move region2 v0+64
 ;; @0040                               v9 = iadd v8, v2
 ;; @0040                               v10 = iconst.i64 0xffff_0000
 ;; @0040                               v11 = iadd v9, v10  ; v10 = 0xffff_0000
@@ -60,10 +60,10 @@
 ;;                                 block0(v0: i64, v1: i64, v2: i64):
 ;; @004c                               v3 = iconst.i64 0xffff_0004
 ;; @004c                               v4 = uadd_overflow_trap v2, v3, heap_oob  ; v3 = 0xffff_0004
-;; @004c                               v5 = load.i64 notrap aligned region3 v0+64
+;; @004c                               v5 = load.i64 notrap aligned region3 v0+72
 ;; @004c                               v6 = icmp ugt v4, v5
 ;; @004c                               trapnz v6, heap_oob
-;; @004c                               v7 = load.i64 notrap aligned can_move region2 v0+56
+;; @004c                               v7 = load.i64 notrap aligned can_move region2 v0+64
 ;; @004c                               v8 = iadd v7, v2
 ;; @004c                               v9 = iconst.i64 0xffff_0000
 ;; @004c                               v10 = iadd v8, v9  ; v9 = 0xffff_0000

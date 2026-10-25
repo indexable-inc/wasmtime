@@ -35,7 +35,7 @@
 ;;       movq    %rdx, %r14
 ;;       callq   0x40d
 ;;       movq    %rax, %r12
-;;       movq    0x20(%rbx), %rdx
+;;       movq    0x28(%rbx), %rdx
 ;;       movl    (%rdx), %esi
 ;;       movl    %esi, %ecx
 ;;       leaq    0x30(%rcx), %rax
@@ -48,7 +48,7 @@
 ;;       movq    0x20(%rax), %rdi
 ;;       leaq    (%rdi, %rcx), %rdx
 ;;       movl    $0x4000002, (%rdi, %rcx)
-;;       movq    0x28(%rbx), %rax
+;;       movq    0x30(%rbx), %rax
 ;;       movl    0xc(%rax), %eax
 ;;       movl    %eax, 4(%rdi, %rcx)
 ;;       movl    $0x30, %eax
@@ -65,7 +65,7 @@
 ;;       callq   0x43a
 ;;       jmp     0xea
 ;;   b6: movl    $0x4000002, %esi
-;;       movq    0x28(%rbx), %rax
+;;       movq    0x30(%rbx), %rax
 ;;       movl    0xc(%rax), %edx
 ;;       movl    $0x30, %ecx
 ;;       movl    $0x10, %r8d

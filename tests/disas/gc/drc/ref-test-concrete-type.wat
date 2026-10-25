@@ -14,7 +14,7 @@
 ;;     region2 = 196 ""
 ;;     region3 = 206 ""
 ;;     region4 = 239 ""
-;;     region5 = 130 ""
+;;     region5 = 136 ""
 ;;     region6 = 6 ""
 ;;     region7 = 134 ""
 ;;     gv0 = vmctx
@@ -49,7 +49,7 @@
 ;; @001d                               v28 = iconst.i64 4
 ;; @001d                               v29 = iadd.i64 v13, v28  ; v28 = 4
 ;; @001d                               v30 = load.i32 user2 readonly region7 v29
-;; @001d                               v22 = load.i64 notrap aligned readonly can_move region5 v0+40
+;; @001d                               v22 = load.i64 notrap aligned readonly can_move region5 v0+48
 ;; @001d                               v23 = load.i32 notrap aligned readonly can_move region6 v22
 ;; @001d                               v31 = icmp eq v30, v23
 ;; @001d                               v32 = uextend.i32 v31

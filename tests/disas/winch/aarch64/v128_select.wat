@@ -33,7 +33,7 @@
 ;;       b       #0x64
 ;;   60: mov     v0.16b, v1.16b
 ;;       mov     x0, #0
-;;       ldur    x1, [x9, #0x38]
+;;       ldur    x1, [x9, #0x40]
 ;;       add     x1, x1, w0, uxtw
 ;;       sub     sp, x28, #8
 ;;       stur    q0, [x1]

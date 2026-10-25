@@ -22,7 +22,7 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       addq    0x38(%rdi), %rsi
+;;       addq    0x40(%rdi), %rsi
 ;;       movl    $0xffff0000, %edi
 ;;       movl    %ecx, (%rsi, %rdi)
 ;;       movq    %rbp, %rsp
@@ -33,7 +33,7 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       movl    %edx, %esi
-;;       addq    0x38(%rdi), %rsi
+;;       addq    0x40(%rdi), %rsi
 ;;       movl    $0xffff0000, %edi
 ;;       movl    (%rsi, %rdi), %eax
 ;;       movq    %rbp, %rsp

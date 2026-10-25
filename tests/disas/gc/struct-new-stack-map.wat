@@ -25,7 +25,7 @@
 ;;       movq    %rdx, %r12
 ;;       movdqu  %xmm0, 8(%rsp)
 ;;       movl    %ecx, (%rsp)
-;;       movq    0x20(%rdi), %rdx
+;;       movq    0x28(%rdi), %rdx
 ;;       movl    (%rdx), %eax
 ;;       movl    %eax, %ecx
 ;;       leaq    0x20(%rcx), %rsi
@@ -39,7 +39,7 @@
 ;;       movq    0x20(%rdx), %rsi
 ;;       leaq    (%rsi, %rcx), %rdx
 ;;       movl    $0xb0000022, (%rsi, %rcx)
-;;       movq    0x28(%rbx), %rdi
+;;       movq    0x30(%rbx), %rdi
 ;;       movl    (%rdi), %edi
 ;;       movl    %edi, 4(%rsi, %rcx)
 ;;       movl    $0x20, %edi
@@ -57,7 +57,7 @@
 ;;       popq    %rbp
 ;;       retq
 ;;   a4: movl    $0xb0000022, %esi
-;;   a9: movq    0x28(%rdi), %rax
+;;   a9: movq    0x30(%rdi), %rax
 ;;   ad: movq    %rdi, %rbx
 ;;   b0: movl    (%rax), %edx
 ;;   b2: movl    $0x20, %ecx

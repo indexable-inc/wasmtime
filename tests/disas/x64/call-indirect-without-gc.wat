@@ -21,8 +21,8 @@
 ;;       movq    %rbx, (%rsp)
 ;;       movq    %r12, 8(%rsp)
 ;;       movq    %rdx, %r12
-;;       movq    0x38(%rdi), %rax
-;;       movq    0x30(%rdi), %r8
+;;       movq    0x40(%rdi), %rax
+;;       movq    0x38(%rdi), %r8
 ;;       movq    %rdi, %r9
 ;;       xorq    %rsi, %rsi
 ;;       movl    %ecx, %edx
@@ -36,7 +36,7 @@
 ;;       je      0x8b
 ;;   56: movq    %r9, %rbx
 ;;       movl    0x10(%rax), %ecx
-;;       movq    0x28(%rbx), %rdx
+;;       movq    0x30(%rbx), %rdx
 ;;       cmpl    4(%rdx), %ecx
 ;;       jne     0x9f
 ;;   69: movq    8(%rax), %rcx

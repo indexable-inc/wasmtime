@@ -29,11 +29,11 @@
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32):
 ;; @0051                               v3 = iconst.i32 0
-;; @0055                               v4 = load.i64 notrap aligned region3 v0+56
+;; @0055                               v4 = load.i64 notrap aligned region3 v0+64
 ;; @0055                               v5 = ireduce.i32 v4
 ;; @0055                               v6 = icmp uge v3, v5  ; v3 = 0
 ;; @0055                               v7 = uextend.i64 v3  ; v3 = 0
-;; @0055                               v8 = load.i64 notrap aligned region2 v0+48
+;; @0055                               v8 = load.i64 notrap aligned region2 v0+56
 ;; @0055                               v9 = iconst.i64 2
 ;; @0055                               v10 = ishl v7, v9  ; v9 = 2
 ;; @0055                               v11 = iadd v8, v10
@@ -58,11 +58,11 @@
 ;;     stack_limit = gv2
 ;;
 ;;                                 block0(v0: i64, v1: i64, v2: i32, v3: i32):
-;; @005e                               v4 = load.i64 notrap aligned region3 v0+56
+;; @005e                               v4 = load.i64 notrap aligned region3 v0+64
 ;; @005e                               v5 = ireduce.i32 v4
 ;; @005e                               v6 = icmp uge v2, v5
 ;; @005e                               v7 = uextend.i64 v2
-;; @005e                               v8 = load.i64 notrap aligned region2 v0+48
+;; @005e                               v8 = load.i64 notrap aligned region2 v0+56
 ;; @005e                               v9 = iconst.i64 2
 ;; @005e                               v10 = ishl v7, v9  ; v9 = 2
 ;; @005e                               v11 = iadd v8, v10

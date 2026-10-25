@@ -94,8 +94,8 @@
 ;; @0044                               v19 = load.i32 notrap aligned region5 v15+56
 ;;                                     v84 = iconst.i32 0
 ;;                                     v74 = iconst.i32 3
-;; @0044                               v5 = iconst.i64 48
-;; @0044                               v6 = iadd.i64 v0, v5  ; v5 = 48
+;; @0044                               v5 = iconst.i64 64
+;; @0044                               v6 = iadd.i64 v0, v5  ; v5 = 64
 ;; @0044                               v29 = iconst.i32 1
 ;; @0044                               jump block6(v84)  ; v84 = 0
 ;;
@@ -109,7 +109,7 @@
 ;; @0044                               v25 = uextend.i64 v86
 ;; @0044                               v26 = iadd.i64 v18, v25
 ;; @0044                               v27 = load.i64 notrap aligned region6 v26
-;;                                     v87 = iadd.i64 v0, v5  ; v5 = 48
+;;                                     v87 = iadd.i64 v0, v5  ; v5 = 64
 ;;                                     v88 = icmp eq v27, v87
 ;;                                     v89 = iconst.i32 1
 ;;                                     v90 = iadd.i32 v21, v89  ; v89 = 1
@@ -229,8 +229,7 @@
 ;; @0062                               v35 = iconst.i32 2
 ;; @0062                               v49 = iconst.i64 40
 ;; @0062                               v52 = stack_addr.i64 ss0
-;; @0062                               v53 = iconst.i64 48
-;; @0062                               v54 = iadd v0, v53  ; v53 = 48
+;; @0062                               v54 = iadd v0, v11  ; v11 = 64
 ;; @0062                               v61 = iconst.i64 112
 ;; @0062                               v64 = iconst.i64 -24
 ;;                                     v143 = iconst.i64 0x0001_0000_0000
@@ -288,7 +287,7 @@
 ;;                                     v155 = iadd v28, v154  ; v154 = 40
 ;; @0062                               store notrap aligned region14 v152, v155+4  ; v152 = 1
 ;; @0062                               store.i64 notrap aligned region15 v52, v155+8
-;;                                     v156 = iadd.i64 v0, v53  ; v53 = 48
+;;                                     v156 = iadd.i64 v0, v11  ; v11 = 64
 ;; @0062                               store notrap aligned region16 v156, v52
 ;; @0062                               store notrap aligned region17 v152, v155  ; v152 = 1
 ;; @0062                               store notrap aligned region12 v152, v28+56  ; v152 = 1

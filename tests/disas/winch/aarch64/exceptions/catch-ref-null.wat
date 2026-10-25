@@ -34,7 +34,7 @@
 ;;       ├─╼ exception frame offset: SP = FP - 0x20
 ;;       ╰─╼ exception handler: tag=0, context at [SP+0x8], handler=0x1cc
 ;;   48: ldur    x9, [x28, #8]
-;;       ldur    x16, [x9, #0x20]
+;;       ldur    x16, [x9, #0x28]
 ;;       ldur    w1, [x16]
 ;;       adds    w1, w1, #7
 ;;       b.hs    #0x2bc
@@ -83,10 +83,10 @@
 ;;       mov     w16, #0x18
 ;;       movk    w16, #0x400, lsl #16
 ;;       stur    w16, [x2]
-;;       ldur    x16, [x9, #0x28]
+;;       ldur    x16, [x9, #0x30]
 ;;       ldur    w16, [x16, #0xc]
 ;;       stur    w16, [x2, #4]
-;;       ldur    x1, [x9, #0x20]
+;;       ldur    x1, [x9, #0x28]
 ;;       mov     w16, w0
 ;;       add     w16, w16, #0x18
 ;;       stur    w16, [x1]
