@@ -367,6 +367,8 @@ impl Metadata<'_> {
             inlining,
             inlining_small_callee_size,
             inlining_sum_size_threshold,
+            inlining_small_sum_size_threshold,
+            inlining_max_callee_size,
             concurrency_support,
             recording,
             asan_stack_switching,
@@ -503,6 +505,16 @@ impl Metadata<'_> {
             inlining_sum_size_threshold,
             other.inlining_sum_size_threshold,
             "function inlining sum-size threshold",
+        )?;
+        Self::check_int(
+            inlining_small_sum_size_threshold,
+            other.inlining_small_sum_size_threshold,
+            "function inlining small-callee sum-size threshold",
+        )?;
+        Self::check_int(
+            inlining_max_callee_size,
+            other.inlining_max_callee_size,
+            "function inlining max callee size",
         )?;
         Self::check_bool(
             concurrency_support,

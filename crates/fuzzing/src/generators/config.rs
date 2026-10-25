@@ -415,6 +415,19 @@ impl Config {
                     Some(std::cmp::min(1000, size).to_string()),
                 ));
             }
+            if let Some(size) = self.wasmtime.inlining_small_sum_size_threshold {
+                cfg.codegen.cranelift.push((
+                    "wasmtime_inlining_small_sum_size_threshold".to_string(),
+                    // Clamp to avoid extreme code size blow up.
+                    Some(std::cmp::min(4000, size).to_string()),
+                ));
+            }
+            if let Some(size) = self.wasmtime.inlining_max_callee_size {
+                cfg.codegen.cranelift.push((
+                    "wasmtime_inlining_max_callee_size".to_string(),
+                    Some(size.to_string()),
+                ));
+            }
 
             // Enabling the verifier will at-least-double compilation time, which
             // with a 20-30x slowdown in fuzzing can cause issues related to
@@ -635,6 +648,8 @@ pub struct WasmtimeConfig {
     inlining: Option<Inlining>,
     inlining_small_callee_size: Option<u32>,
     inlining_sum_size_threshold: Option<u32>,
+    inlining_small_sum_size_threshold: Option<u32>,
+    inlining_max_callee_size: Option<u32>,
     /// ix fork: `Config::ix_wasm_cc`, modulo 2 (standard, wide).
     ix_wasm_cc: u8,
     use_precompiled_cwasm: bool,
