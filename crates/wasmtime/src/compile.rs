@@ -915,6 +915,17 @@ the use case.
             _ => {}
         }
 
+        // The max callee size is a hard cap, checked first so that it also
+        // holds when it is set below the small-callee size.
+        if callee_size > tunables.inlining_max_callee_size {
+            log::trace!(
+                "  --> not inlining: callee's size is greater than the max callee size: \
+                 {callee_size} > {}",
+                tunables.inlining_max_callee_size
+            );
+            return false;
+        }
+
         // Put a limit on how large we can make a function via inlining to cap
         // code bloat. Small callees get their own, usually larger, cap: they
         // are leaf helpers whose call overhead (frame setup, argument moves,
@@ -938,15 +949,6 @@ the use case.
                 tunables.inlining_small_callee_size
             );
             return true;
-        }
-
-        if callee_size > tunables.inlining_max_callee_size {
-            log::trace!(
-                "  --> not inlining: callee's size is greater than the max callee size: \
-                 {callee_size} > {}",
-                tunables.inlining_max_callee_size
-            );
-            return false;
         }
 
         if sum_size > tunables.inlining_sum_size_threshold {
