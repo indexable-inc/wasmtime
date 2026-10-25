@@ -179,8 +179,16 @@ macro_rules! for_each_vmctx_type {
 
                     // ix fork: the module's read-only `call_indirect`
                     // dispatch array (`wasmtime_environ::IxDispatchPlan`),
-                    // or null when it has none.
-                    field { #[readonly] #[can_move] ix_dispatch: VmPtr<usize> }
+                    // or null when it has none. The array is filled by the
+                    // runtime before any instance runs and is never written
+                    // by compiled code, then mapped read-only; it is indexed
+                    // dynamically, so it is one alias region as a whole.
+                    field {
+                        #[readonly]
+                        #[can_move]
+                        #[pointee(#[readonly] IxDispatchArray as ix_dispatch_array: usize)]
+                        ix_dispatch: VmPtr<usize>
+                    }
                 }
 
                 // Variable-width fields come after the fixed-width fields

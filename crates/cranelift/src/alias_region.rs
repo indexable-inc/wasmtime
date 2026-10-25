@@ -88,6 +88,7 @@ enum VmType {
     // ix fork: kept last so upstream variants keep their discriminants, and
     // with them the alias-region `user_id` hashes in `tests/disas`.
     PollWord,
+    IxDispatchArray,
 }
 
 /// A key that uniquely identifies an alias region across an entire compilation.
@@ -885,6 +886,7 @@ macro_rules! define_vmctx_alias_region_helpers {
     (@field_ty $pt:expr, VMSharedTypeIndex) => { ir::types::I32 };
     (@field_ty $pt:expr, AtomicU64) => { ir::types::I64 };
     (@field_ty $pt:expr, unsafe extern "C" fn) => { $pt };
+    (@field_ty $pt:expr, usize) => { $pt };
 
     // Determine the Cranelift type a field is *accessed* as: the classification
     // of its `#[access_as = T]` type if it has one, and of its declared type

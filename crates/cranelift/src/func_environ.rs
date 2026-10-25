@@ -2447,12 +2447,21 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
         let addr = self.builder.ins().iadd(base, offset);
         let row_offset = i32::try_from(u64::from(start) * u64::from(pointer_type.bytes()))
             .expect("dispatch array capped well below 2 GiB");
-        let code = self.builder.ins().load(
-            pointer_type,
-            ir::MemFlagsData::trusted().with_readonly(),
-            addr,
-            row_offset,
-        );
+        // The entry is in bounds and aligned (the index is clamped to `len`,
+        // and the runtime checks each row's `len + 1` entries lie inside the
+        // `usize`-aligned array), so `notrap`/`aligned` from `trusted()` hold;
+        // compiled code never stores to the array, so `readonly` holds.
+        let flags = self
+            .env
+            .alias_regions
+            .vmctx()
+            .ix_dispatch_array()
+            .to_deferred_load(self.builder.func)
+            .flags;
+        let code = self
+            .builder
+            .ins()
+            .load(pointer_type, flags, addr, row_offset);
 
         let join = self.builder.create_block();
         let join_code = self.builder.append_block_param(join, pointer_type);
@@ -2503,10 +2512,13 @@ impl<'a, 'func, 'module_env> Call<'a, 'func, 'module_env> {
             .ins()
             .ishl_imm_u(index, i64::from(table_data.element_size.trailing_zeros()));
         let addr = self.builder.ins().iadd(base, offset);
-        let raw = self
-            .builder
-            .ins()
-            .load(pointer_type, ir::MemFlagsData::trusted(), addr, 0);
+        let region = self.env.table_alias_region(self.builder.func, table_index);
+        let raw = self.builder.ins().load(
+            pointer_type,
+            ir::MemFlagsData::trusted().with_alias_region(Some(region)),
+            addr,
+            0,
+        );
         let funcref = if self.env.tunables.table_lazy_init {
             self.builder.ins().band_imm_u(raw, Imm64::from(-2))
         } else {
