@@ -1,0 +1,10 @@
+test compile expect-fail
+set enable_pcc=true
+target x86_64
+
+;; `sextend` of an arbitrary byte can be negative: no 0..=0xffffffff range.
+function %sextend_any(i8) -> i64 {
+block0(v0: i8):
+    v1 ! range(64, 0, 0xffffffff) = sextend.i64 v0
+    return v1
+}

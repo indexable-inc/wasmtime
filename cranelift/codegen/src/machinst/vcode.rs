@@ -1574,6 +1574,17 @@ impl<I: VCodeInst> VCode<I> {
     }
 
     /// The registers an instruction defines that carry facts.
+    /// The instruction that defines `vreg` (vregs are SSA before register
+    /// allocation), by a scan of the whole function; `None` for a block
+    /// parameter. For the PCC checker's rare lookups.
+    pub fn def_inst_of(&self, vreg: VReg) -> Option<InsnIndex> {
+        (0..self.num_insts()).map(InsnIndex::new).find(|&i| {
+            self.inst_operands(i)
+                .iter()
+                .any(|o| o.kind() == OperandKind::Def && o.vreg() == vreg)
+        })
+    }
+
     pub fn inst_defs_with_facts(&self, inst: InsnIndex) -> SmallVec<[VReg; 2]> {
         self.inst_operands(inst)
             .iter()

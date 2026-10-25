@@ -782,8 +782,100 @@ fn check_external(
             check_cmov(ctx, vcode, r64.as_ref(), rm64, &mem, None)
         }
 
+        // Sign extensions: exact when the source is below the sign bit.
+        I::movsbq_rm(i) => check_sext(ctx, vcode, inst_idx, inst, wg(&i.r64), src_of(&i.rm8), 8),
+        I::movsbl_rm(i) => check_sext(ctx, vcode, inst_idx, inst, wg(&i.r32), src_of(&i.rm8), 8),
+        I::movswq_rm(i) => check_sext(ctx, vcode, inst_idx, inst, wg(&i.r64), src_of(&i.rm16), 16),
+        I::movswl_rm(i) => check_sext(ctx, vcode, inst_idx, inst, wg(&i.r32), src_of(&i.rm16), 16),
+        I::movslq_rm(i) => check_sext(ctx, vcode, inst_idx, inst, wg(&i.r64), src_of(&i.rm32), 32),
+
         _ => check_generic(ctx, vcode, inst_idx, inst),
     }
+}
+
+/// `movsx` from `from_bits` (a 32-bit destination also zeroes the upper half):
+/// when the source register's low `from_bits` bits are known to lie below the
+/// sign bit, sign extension is zero extension, so the result is that range.
+/// The source's fact, or 0..=1 for a `setcc` result. Otherwise, the generic
+/// rule.
+///
+/// Lowering states no fact on a `setcc` result, but the egraph unions
+/// `sextend` and `uextend` of a compare (0 or 1), so the `uextend`'s
+/// memory-index range fact can land on a `sextend`, lowered to `movsx` of the
+/// `setcc` byte.
+fn check_sext(
+    ctx: &FactContext,
+    vcode: &mut VCode<Inst>,
+    inst_idx: InsnIndex,
+    inst: &AsmInst,
+    out: Writable<Reg>,
+    src: Src,
+    from_bits: u16,
+) -> PccResult<()> {
+    if let Src::Reg(src) = src {
+        let fact = match vcode.vreg_fact(src.into()) {
+            Some(f) => Some(f.clone()),
+            None if is_setcc_result(vcode, src) => Some(Fact::Range {
+                bit_width: 8,
+                min: 0,
+                max: 1,
+            }),
+            None => None,
+        };
+        // A range over at least `from_bits` low bits whose maximum is below
+        // `1 << (from_bits - 1)`: the low `from_bits` bits are that value, with
+        // the sign bit clear.
+        if let Some(Fact::Range {
+            bit_width,
+            min,
+            max,
+        }) = fact
+        {
+            if bit_width >= from_bits && max < (1u64 << (from_bits - 1)) {
+                return check_output(ctx, vcode, out, &[src], |_vcode| {
+                    Ok(Some(Fact::Range {
+                        bit_width: 64,
+                        min,
+                        max,
+                    }))
+                });
+            }
+        }
+    }
+    check_generic(ctx, vcode, inst_idx, inst)
+}
+
+/// Whether `reg` is a vreg defined by a `setcc` (its low byte is 0 or 1).
+fn is_setcc_result(vcode: &VCode<Inst>, reg: Reg) -> bool {
+    use asm::inst::Inst as I;
+    if !reg.is_virtual() {
+        return false;
+    }
+    let Some(def) = vcode.def_inst_of(reg.into()) else {
+        return false;
+    };
+    let Inst::External { inst } = &vcode[def] else {
+        return false;
+    };
+    matches!(
+        inst,
+        I::seta_m(_)
+            | I::setae_m(_)
+            | I::setb_m(_)
+            | I::setbe_m(_)
+            | I::sete_m(_)
+            | I::setg_m(_)
+            | I::setge_m(_)
+            | I::setl_m(_)
+            | I::setle_m(_)
+            | I::setne_m(_)
+            | I::setno_m(_)
+            | I::setnp_m(_)
+            | I::setns_m(_)
+            | I::seto_m(_)
+            | I::setp_m(_)
+            | I::sets_m(_)
+    )
 }
 
 /// The registers an amode reads.
