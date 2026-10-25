@@ -192,7 +192,22 @@ impl Context {
         self.func.dfg.resolve_all_aliases();
 
         if opt_level != OptLevel::None {
+            // PCC: facts on the entry block's parameters are trusted (the
+            // checker cannot check an ABI argument), so keep exactly the
+            // ones the producer stated: the egraph's fact merges must not
+            // add or change any.
+            let entry_facts = self.func.layout.entry_block().map(|entry| {
+                self.func
+                    .dfg
+                    .block_params(entry)
+                    .iter()
+                    .map(|&p| (p, self.func.dfg.facts[p].clone()))
+                    .collect::<alloc::vec::Vec<_>>()
+            });
             self.egraph_pass(isa, ctrl_plane)?;
+            for (p, fact) in entry_facts.into_iter().flatten() {
+                self.func.dfg.facts[p] = fact;
+            }
         }
 
         Ok(())
@@ -380,6 +395,7 @@ impl Context {
             &self.domtree,
             &self.loop_analysis,
             &mut alias_analysis,
+            &fisa.flags,
             ctrl_plane,
             &mut self.cfg,
         );

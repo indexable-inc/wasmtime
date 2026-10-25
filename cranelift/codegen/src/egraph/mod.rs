@@ -9,13 +9,16 @@ use crate::dominator_tree::DominatorTree;
 use crate::egraph::elaborate::Elaborator;
 use crate::flowgraph::ControlFlowGraph;
 use crate::inst_predicates::{is_mergeable_for_egraph, is_pure_for_egraph};
+use crate::ir::pcc::Fact;
 use crate::ir::{
-    Block, DataFlowGraph, Function, Inst, InstructionData, Type, Value, ValueDef, ValueListPool,
+    Block, DataFlowGraph, Function, Inst, InstructionData, Opcode, Type, Value, ValueDef,
+    ValueListPool,
 };
 use crate::loop_analysis::LoopAnalysis;
 use crate::opts::IsleContext;
 use crate::opts::generated_code::SkeletonInstSimplification;
 use crate::scoped_hash_map::{Entry as ScopedEntry, ScopedHashMap};
+use crate::settings::Flags;
 use crate::take_and_replace::TakeAndReplace;
 use crate::trace;
 use alloc::{vec, vec::Vec};
@@ -107,6 +110,8 @@ pub struct EgraphPass<'a> {
     /// Loop analysis results, used for built-in LICM during
     /// elaboration.
     loop_analysis: &'a LoopAnalysis,
+    /// Compiler flags.
+    flags: &'a Flags,
     /// Chaos-mode control-plane so we can test that we still get
     /// correct results when our heuristics make bad decisions.
     ctrl_plane: &'a mut ControlPlane,
@@ -157,6 +162,7 @@ where
     pub(crate) alias_analysis: &'opt mut AliasAnalysis<'analysis>,
     pub(crate) alias_analysis_state: &'opt mut MemoryState,
     pub(crate) branch_to_trap_analysis: &'opt mut BranchToTrapAnalysis,
+    flags: &'opt Flags,
     ctrl_plane: &'opt mut ControlPlane,
     // Held locally during optimization of one node (recursively):
     pub(crate) rewrite_depth: usize,
@@ -232,6 +238,7 @@ where
                 let result = self.func.dfg.first_result(inst);
                 self.value_to_opt_value[result] = orig_result;
                 self.available_block[result] = self.available_block[orig_result];
+                self.func.dfg.merge_facts(result, orig_result);
             }
             orig_result
         } else {
@@ -254,6 +261,8 @@ where
                     (inst, result, ty)
                 }
             };
+
+            self.attach_constant_fact(inst, result, ty);
 
             self.available_block[result] = self.get_available_block(inst);
             let opt_value = self.optimize_pure_enode(inst);
@@ -420,6 +429,12 @@ where
         {
             optimized_values.clear();
             ctx.stats.pure_inst_subsume += 1;
+            // PCC: the subsuming value replaces the original outright, so it
+            // must carry the original's facts (for example the bounds-check
+            // `Def`/range on a `uextend` index that a rule folded into
+            // another `uextend`); otherwise the fact is lost and the load
+            // that uses it can't be proven.
+            ctx.func.dfg.merge_facts(orig_value, subsuming_value);
             subsuming_value
         } else {
             let mut union_value = orig_value;
@@ -446,6 +461,7 @@ where
                 ctx.eclass_size[union_value] = eclass_size - 1;
                 ctx.stats.union += 1;
                 trace!(" -> union: now {}", union_value);
+                ctx.func.dfg.merge_facts(old_union_value, optimized_value);
                 ctx.available_block[union_value] =
                     ctx.merge_availability(old_union_value, optimized_value);
             }
@@ -521,6 +537,7 @@ where
                             self.stats.skeleton_inst_gvn += 1;
                             self.value_to_opt_value[result] = orig_result;
                             self.available_block[result] = self.available_block[orig_result];
+                            self.func.dfg.merge_facts(result, orig_result);
                             trace!(" -> merges result {} to {}", result, orig_result);
                         }
                         (None, None) => {
@@ -562,6 +579,7 @@ where
                 );
                 self.value_to_opt_value[result] = new_result;
                 self.available_block[result] = self.available_block[new_result];
+                self.func.dfg.merge_facts(result, new_result);
                 Some(SkeletonInstSimplification::Remove)
             }
             OptResult::IdempotentStore => {
@@ -742,6 +760,23 @@ where
         // Return the best simplification!
         best
     }
+
+    /// Helper to propagate facts on constant values: if PCC is
+    /// enabled, then unconditionally add a fact attesting to the
+    /// Value's concrete value.
+    fn attach_constant_fact(&mut self, inst: Inst, value: Value, ty: Type) {
+        if self.flags.enable_pcc() {
+            if let InstructionData::UnaryImm {
+                opcode: Opcode::Iconst,
+                imm,
+            } = self.func.dfg.insts[inst]
+            {
+                let imm: i64 = imm.into();
+                self.func.dfg.facts[value] =
+                    Some(Fact::constant(ty.bits().try_into().unwrap(), imm as u64));
+            }
+        }
+    }
 }
 
 impl SkeletonInstSimplification {
@@ -781,6 +816,7 @@ impl<'a> EgraphPass<'a> {
         domtree: &'a DominatorTree,
         loop_analysis: &'a LoopAnalysis,
         alias_analysis: &'a mut AliasAnalysis<'a>,
+        flags: &'a Flags,
         ctrl_plane: &'a mut ControlPlane,
         cfg: &'a mut ControlFlowGraph,
     ) -> Self {
@@ -789,6 +825,7 @@ impl<'a> EgraphPass<'a> {
             domtree,
             loop_analysis,
             alias_analysis,
+            flags,
             ctrl_plane,
             cfg,
             branch_to_trap_analysis: BranchToTrapAnalysis::default(),
@@ -973,6 +1010,26 @@ impl<'a> EgraphPass<'a> {
                     new_value
                 });
 
+                // PCC: rename the symbols in this instruction's result facts
+                // the same way, so that two values the egraph merges name
+                // the same symbols and their facts merge without conflict.
+                // (Aliases are already gone, see `resolve_all_aliases`;
+                // symbols not yet processed keep their name.)
+                for i in 0..cursor.func.dfg.inst_results(inst).len() {
+                    let result = cursor.func.dfg.inst_results(inst)[i];
+                    if let Some(fact) = &cursor.func.dfg.facts[result] {
+                        let dfg = &cursor.func.dfg;
+                        let canon = |v: Value| {
+                            let o = value_to_opt_value[v];
+                            dfg.canonical_symbol(if o == Value::reserved_value() { v } else { o })
+                        };
+                        let mapped = fact.map_symbols(&canon);
+                        if mapped != *fact {
+                            cursor.func.dfg.facts[result] = Some(mapped);
+                        }
+                    }
+                }
+
                 // Build a context for optimization, with borrows of
                 // state. We can't invoke a method on `self` because
                 // we've borrowed `self.func` mutably (as
@@ -995,6 +1052,7 @@ impl<'a> EgraphPass<'a> {
                     alias_analysis: self.alias_analysis,
                     alias_analysis_state: &mut alias_analysis_state,
                     branch_to_trap_analysis: &mut self.branch_to_trap_analysis,
+                    flags: self.flags,
                     ctrl_plane: self.ctrl_plane,
                     optimized_values: Default::default(),
                     optimized_insts: Default::default(),
@@ -1030,6 +1088,105 @@ impl<'a> EgraphPass<'a> {
             self.alias_analysis
                 .finish_scope(block, alias_analysis_state);
         }
+
+        // PCC: a final renaming of every fact's symbols, now that every value
+        // has its optimized value: facts set before a symbol was processed
+        // (or copied from a merge) name the same symbols as the rest.
+        //
+        // Symbols are named by eclass: values joined by a union node (or by a
+        // `Def`/`Def` fact merge) are equal, so all of them get one name, the
+        // smallest value of the class. Two values the egraph proved equal can
+        // otherwise keep different names when one was optimized before the
+        // rewrite that joined them.
+        if self.flags.enable_pcc() {
+            let dfg = &mut self.func.dfg;
+            let mut parent: alloc::vec::Vec<u32> = (0..dfg.num_values() as u32).collect();
+            fn find(parent: &mut [u32], mut v: u32) -> u32 {
+                while parent[v as usize] != v {
+                    let p = parent[v as usize];
+                    parent[v as usize] = parent[p as usize];
+                    v = p;
+                }
+                v
+            }
+            fn join(parent: &mut [u32], a: u32, b: u32) {
+                let (a, b) = (find(parent, a), find(parent, b));
+                let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                parent[hi as usize] = lo;
+            }
+            for v in dfg.values() {
+                if let ValueDef::Union(x, y) = dfg.value_def(v) {
+                    join(&mut parent, v.as_u32(), x.as_u32());
+                    join(&mut parent, v.as_u32(), y.as_u32());
+                }
+                if let Some(to) = dfg.fact_symbol_aliases[v] {
+                    join(&mut parent, v.as_u32(), to.as_u32());
+                }
+            }
+            for value in dfg.facts.keys() {
+                if let Some(fact) = &dfg.facts[value] {
+                    let canon = |v: Value| {
+                        let o = value_to_opt_value[v];
+                        let o = if o == Value::reserved_value() { v } else { o };
+                        // `find` on a copy-free path: `parent` is fully built.
+                        let mut r = o.as_u32();
+                        while parent[r as usize] != r {
+                            r = parent[r as usize];
+                        }
+                        Value::from_u32(r)
+                    };
+                    let mapped = fact.map_symbols(&canon);
+                    if mapped != *fact {
+                        dfg.facts[value] = Some(mapped);
+                    }
+                }
+            }
+
+            // PCC: give every member of an eclass the facts of the class.
+            // `merge_facts` puts a rewritten value's facts on the union node it
+            // builds, but a member that was itself the result of a nested
+            // rewrite (say `uextend.i64 (uextend.i32 x)` folded to
+            // `uextend.i64 x`) never sees them, and elaboration may pick exactly
+            // that member. Members are equal values, so the class's facts hold
+            // for each; and every fact is still checked where its value is
+            // defined in VCode, so this can only cost completeness, never
+            // soundness. Only members with no fact of their own are filled, and
+            // a class whose facts conflict is left alone.
+            let mut class: alloc::vec::Vec<u32> = (0..dfg.num_values() as u32).collect();
+            for v in dfg.values() {
+                if let ValueDef::Union(x, y) = dfg.value_def(v) {
+                    join(&mut class, v.as_u32(), x.as_u32());
+                    join(&mut class, v.as_u32(), y.as_u32());
+                }
+            }
+            let mut class_fact: crate::FxHashMap<u32, Option<Fact>> = Default::default();
+            for v in dfg.values() {
+                let Some(fact) = &dfg.facts[v] else { continue };
+                let root = find(&mut class, v.as_u32());
+                let merged = match class_fact.get(&root) {
+                    None => Some(fact.clone()),
+                    Some(None) => None,
+                    Some(Some(prev)) => {
+                        let merged = Fact::intersect(prev, fact);
+                        (merged != Fact::Conflict).then_some(merged)
+                    }
+                };
+                class_fact.insert(root, merged);
+            }
+            if !class_fact.is_empty() {
+                let values: Vec<Value> = dfg.values().collect();
+                for v in values {
+                    if dfg.facts[v].is_some() {
+                        continue;
+                    }
+                    let root = find(&mut class, v.as_u32());
+                    if let Some(Some(fact)) = class_fact.get(&root) {
+                        dfg.facts[v] = Some(fact.clone());
+                    }
+                }
+            }
+        }
+
         cfg_maybe_changed
     }
 

@@ -564,11 +564,266 @@ fn inline_one(
         fixup_inlined_call_exception_tables(allocs, func, call_exception_table);
     }
 
+    // Carry proof-carrying-code facts and memory types over to the inlined
+    // body, so the checker can still prove its memory accesses.
+    if !callee.memory_types.is_empty() || callee.dfg.facts.iter().any(|(_, f)| f.is_some()) {
+        inline_pcc(allocs, func, callee, &entity_map);
+    }
+
     debug_assert!(
         func.layout.is_block_inserted(last_inlined_block),
         "last_inlined_block={last_inlined_block} should be inserted in the layout"
     );
     Ok(last_inlined_block)
+}
+
+/// Copy the callee's PCC memory types, global-value facts and value facts
+/// into the caller.
+///
+/// Facts name memory types and global values, and the checker compares them
+/// by identity. A callee memory type (or global value) that is structurally
+/// equal to one the caller already has maps to the caller's, so the callee's
+/// `vmctx` struct and heap types become the caller's when both come from the
+/// same module; otherwise it is copied. A fact that names a callee value
+/// that was not inlined (unreachable code) is dropped, which can only make
+/// the checker reject, never accept.
+fn inline_pcc(
+    allocs: &InliningAllocs,
+    func: &mut ir::Function,
+    callee: &ir::Function,
+    entity_map: &EntityMap,
+) {
+    use crate::ir::pcc::{BaseExpr, Expr, Fact};
+    use crate::ir::{MemoryTypeData, MemoryTypeField};
+
+    let gv_offset = entity_map.global_value_offset.unwrap();
+
+    // Global values: the caller's structurally equal one, else the copy.
+    let mut gv_map: SecondaryMap<ir::GlobalValue, PackedOption<ir::GlobalValue>> =
+        SecondaryMap::with_capacity(callee.global_values.len());
+    fn map_gv(
+        gv: ir::GlobalValue,
+        func: &ir::Function,
+        callee: &ir::Function,
+        gv_offset: u32,
+        gv_map: &mut SecondaryMap<ir::GlobalValue, PackedOption<ir::GlobalValue>>,
+        depth: u32,
+    ) -> ir::GlobalValue {
+        if let Some(m) = gv_map[gv].expand() {
+            return m;
+        }
+        let copy = ir::GlobalValue::from_u32(gv_offset + gv.as_u32());
+        let canon = |data: &ir::GlobalValueData| {
+            func.global_values
+                .iter()
+                .take(gv_offset as usize)
+                .find(|(_, d)| *d == data)
+                .map(|(g, _)| g)
+        };
+        let mapped = match &func.global_values[copy] {
+            _ if depth > 16 => copy,
+            ir::GlobalValueData::Load {
+                offset,
+                global_type,
+                flags,
+                ..
+            } => {
+                let ir::GlobalValueData::Load { base, .. } = callee.global_values[gv] else {
+                    unreachable!()
+                };
+                let base = map_gv(base, func, callee, gv_offset, gv_map, depth + 1);
+                canon(&ir::GlobalValueData::Load {
+                    base,
+                    offset: *offset,
+                    global_type: *global_type,
+                    flags: *flags,
+                })
+                .unwrap_or(copy)
+            }
+            ir::GlobalValueData::IAddImm {
+                offset,
+                global_type,
+                ..
+            } => {
+                let ir::GlobalValueData::IAddImm { base, .. } = callee.global_values[gv] else {
+                    unreachable!()
+                };
+                let base = map_gv(base, func, callee, gv_offset, gv_map, depth + 1);
+                canon(&ir::GlobalValueData::IAddImm {
+                    base,
+                    offset: *offset,
+                    global_type: *global_type,
+                })
+                .unwrap_or(copy)
+            }
+            data @ ir::GlobalValueData::VMContext => canon(data).unwrap_or(copy),
+            _ => copy,
+        };
+        gv_map[gv] = mapped.into();
+        mapped
+    }
+    for gv in callee.global_values.keys() {
+        map_gv(gv, func, callee, gv_offset, &mut gv_map, 0);
+    }
+    let gv_of = |gv: ir::GlobalValue| gv_map[gv].expand().unwrap();
+
+    // Values named in facts.
+    let value_of = |v: ir::Value| allocs.get_inlined_value(callee, v);
+    let map_expr = |e: &Expr| -> Option<Expr> {
+        let base = match &e.base {
+            BaseExpr::None => BaseExpr::None,
+            BaseExpr::Max => BaseExpr::Max,
+            BaseExpr::GlobalValue(gv) => BaseExpr::GlobalValue(gv_of(*gv)),
+            BaseExpr::Value(v) => BaseExpr::Value(value_of(*v)?),
+        };
+        Some(Expr {
+            base,
+            offset: e.offset,
+        })
+    };
+
+    // Memory types. A type is mapped once every type its field facts name is
+    // mapped (so equal types dedupe whatever order they were created in); a
+    // cycle is broken by copying, with the unmappable facts dropped.
+    let mut mt_map: SecondaryMap<ir::MemoryType, PackedOption<ir::MemoryType>> =
+        SecondaryMap::with_capacity(callee.memory_types.len());
+    let caller_mts = func.memory_types.len();
+    let names = |data: &MemoryTypeData| -> Vec<ir::MemoryType> {
+        match data {
+            MemoryTypeData::Struct { fields, .. } => fields
+                .iter()
+                .filter_map(|f| match &f.fact {
+                    Some(Fact::Mem { ty, .. } | Fact::DynamicMem { ty, .. }) => Some(*ty),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let map_fact = |f: &Fact,
+                    mt_map: &SecondaryMap<ir::MemoryType, PackedOption<ir::MemoryType>>|
+     -> Option<Fact> {
+        Some(match f {
+            Fact::Range { .. } | Fact::Conflict => f.clone(),
+            Fact::DynamicRange {
+                bit_width,
+                min,
+                max,
+            } => Fact::DynamicRange {
+                bit_width: *bit_width,
+                min: map_expr(min)?,
+                max: map_expr(max)?,
+            },
+            Fact::Mem {
+                ty,
+                min_offset,
+                max_offset,
+                nullable,
+            } => Fact::Mem {
+                ty: mt_map[*ty].expand()?,
+                min_offset: *min_offset,
+                max_offset: *max_offset,
+                nullable: *nullable,
+            },
+            Fact::DynamicMem {
+                ty,
+                min,
+                max,
+                nullable,
+            } => Fact::DynamicMem {
+                ty: mt_map[*ty].expand()?,
+                min: map_expr(min)?,
+                max: map_expr(max)?,
+                nullable: *nullable,
+            },
+            Fact::Def { value } => Fact::Def {
+                value: value_of(*value)?,
+            },
+            Fact::Compare { kind, lhs, rhs } => Fact::Compare {
+                kind: *kind,
+                lhs: map_expr(lhs)?,
+                rhs: map_expr(rhs)?,
+            },
+        })
+    };
+    let mut pending: Vec<ir::MemoryType> = callee.memory_types.keys().collect();
+    while !pending.is_empty() {
+        let ready: Vec<ir::MemoryType> = pending
+            .iter()
+            .copied()
+            .filter(|&mt| {
+                names(&callee.memory_types[mt])
+                    .iter()
+                    .all(|n| mt_map[*n].is_some())
+            })
+            .collect();
+        // No progress means a cycle: take the first pending type anyway.
+        let batch = if ready.is_empty() {
+            alloc::vec![pending[0]]
+        } else {
+            ready
+        };
+        pending.retain(|mt| !batch.contains(mt));
+        for mt in batch {
+            let data = match &callee.memory_types[mt] {
+                MemoryTypeData::Struct { size, fields } => MemoryTypeData::Struct {
+                    size: *size,
+                    fields: fields
+                        .iter()
+                        .map(|field| MemoryTypeField {
+                            offset: field.offset,
+                            ty: field.ty,
+                            // A fact that cannot be mapped is dropped: a load of
+                            // the field then proves nothing about its value.
+                            fact: field.fact.as_ref().and_then(|f| map_fact(f, &mt_map)),
+                            readonly: field.readonly,
+                        })
+                        .collect(),
+                },
+                MemoryTypeData::Memory { size } => MemoryTypeData::Memory { size: *size },
+                MemoryTypeData::DynamicMemory { size, gv } => MemoryTypeData::DynamicMemory {
+                    size: *size,
+                    gv: gv_of(*gv),
+                },
+                MemoryTypeData::Empty => MemoryTypeData::Empty,
+            };
+            let existing = func
+                .memory_types
+                .iter()
+                .take(caller_mts)
+                .find(|(_, d)| **d == data)
+                .map(|(m, _)| m);
+            let mapped = existing.unwrap_or_else(|| func.create_memory_type(data));
+            mt_map[mt] = mapped.into();
+        }
+    }
+
+    // Global-value facts, on the copied global values.
+    for (gv, fact) in callee.global_value_facts.iter() {
+        if let Some(fact) = fact {
+            let copy = ir::GlobalValue::from_u32(gv_offset + gv.as_u32());
+            func.global_value_facts[copy] = map_fact(fact, &mt_map);
+        }
+    }
+
+    // Value facts. The callee's entry-block parameters map to the call's
+    // arguments, which keep the caller's facts: a callee parameter fact is an
+    // assumption, and must not become one about the caller's value.
+    let entry_params: &[ir::Value] = callee
+        .layout
+        .entry_block()
+        .map_or(&[], |b| callee.dfg.block_params(b));
+    for (callee_val, fact) in callee.dfg.facts.iter() {
+        let Some(fact) = fact else { continue };
+        if entry_params.contains(&callee_val) {
+            continue;
+        }
+        let Some(inlined) = allocs.get_inlined_value(callee, callee_val) else {
+            continue;
+        };
+        debug_assert!(func.dfg.facts[inlined].is_none());
+        func.dfg.facts[inlined] = map_fact(fact, &mt_map);
+    }
 }
 
 /// Append stack map entries from the caller and callee to the given inlined

@@ -4,6 +4,7 @@ use crate::entity::{self, PrimaryMap, SecondaryMap};
 use crate::ir;
 use crate::ir::dynamic_type::{DynamicTypeData, DynamicTypes};
 use crate::ir::instructions::{CallInfo, InstructionData};
+use crate::ir::pcc::Fact;
 use crate::ir::user_stack_maps::{UserStackMapEntry, UserStackMapEntryVec};
 use crate::ir::{
     AliasRegionSet, Block, BlockArg, BlockCall, ConstantData, ConstantPool, DynamicType,
@@ -141,6 +142,14 @@ pub struct DataFlowGraph {
     /// Primary value table with entries for all values.
     values: PrimaryMap<Value, ValueDataPacked>,
 
+    /// Facts: proof-carrying-code assertions about values.
+    pub facts: SecondaryMap<Value, Option<Fact>>,
+
+    /// PCC: symbols renamed by fact merges. When two values that each define
+    /// a symbol (`Fact::Def`) are merged, the merged value keeps the smaller
+    /// symbol, and the other maps to it here (see `canonical_symbol`).
+    pub fact_symbol_aliases: SecondaryMap<Value, Option<Value>>,
+
     /// Function signature table. These signatures are referenced by indirect call instructions as
     /// well as the external function references.
     pub signatures: PrimaryMap<SigRef, Signature>,
@@ -181,6 +190,8 @@ impl DataFlowGraph {
             dynamic_types: DynamicTypes::new(),
             value_lists: ValueListPool::new(),
             values: PrimaryMap::new(),
+            facts: SecondaryMap::new(),
+            fact_symbol_aliases: SecondaryMap::new(),
             signatures: PrimaryMap::new(),
             ext_funcs: PrimaryMap::new(),
             values_labels: None,
@@ -210,6 +221,8 @@ impl DataFlowGraph {
         self.jump_tables.clear();
         self.mem_flags.clear();
         self.alias_regions.clear();
+        self.facts.clear();
+        self.fact_symbol_aliases.clear();
     }
 
     /// Get the total number of instructions created in this function, whether they are currently
@@ -498,6 +511,36 @@ impl DataFlowGraph {
         // - `values` only has value references in aliases (which we've
         //   removed), and unions (but the egraph pass ensures there are no
         //   aliases before creating unions).
+
+        // Rename alias symbols named in `facts` (PCC) to their final values,
+        // so that facts keep naming values that still exist.
+        for value in self.facts.keys() {
+            if let Some(fact) = &self.facts[value] {
+                let values = &self.values;
+                let mapped = fact.map_symbols(&|v| match ValueData::from(values[v]) {
+                    ValueData::Alias { original, .. } => original,
+                    _ => v,
+                });
+                if mapped != *fact {
+                    self.facts[value] = Some(mapped);
+                }
+            }
+        }
+
+        // Merge `facts` from any alias onto the aliased value. Note that if
+        // there was a chain of aliases, at this point every alias that was in
+        // the chain points to the same final value, so their facts will all be
+        // merged together.
+        for value in self.facts.keys() {
+            if let ValueData::Alias { original, .. } = self.values[value].into() {
+                if let Some(new_fact) = self.facts[value].take() {
+                    match &mut self.facts[original] {
+                        Some(old_fact) => *old_fact = Fact::intersect(old_fact, &new_fact),
+                        old_fact => *old_fact = Some(new_fact),
+                    }
+                }
+            }
+        }
 
         // - `signatures` and `ext_funcs` have no values.
 
@@ -1065,7 +1108,13 @@ impl DataFlowGraph {
         // Get the controlling type variable.
         let ctrl_typevar = self.ctrl_typevar(inst);
         // Create new result values.
-        self.make_inst_results(new_inst, ctrl_typevar);
+        let num_results = self.make_inst_results(new_inst, ctrl_typevar);
+        // Copy over PCC facts, if any.
+        for i in 0..num_results {
+            let old_result = self.inst_results(inst)[i];
+            let new_result = self.inst_results(new_inst)[i];
+            self.facts[new_result] = self.facts[old_result].clone();
+        }
         new_inst
     }
 
@@ -1399,6 +1448,56 @@ impl DataFlowGraph {
     /// `change_to_alias()`.
     pub fn detach_inst_results(&mut self, inst: Inst) {
         self.results[inst].clear(&mut self.value_lists);
+    }
+
+    /// PCC: the symbol a fact-merge renamed `v` to, if any (else `v`).
+    pub fn canonical_symbol(&self, mut v: Value) -> Value {
+        // Each alias points to a smaller value, so this terminates.
+        while let Some(to) = self.fact_symbol_aliases[v] {
+            v = to;
+        }
+        v
+    }
+
+    /// Merge the facts for two values. If both values have facts and
+    /// they differ, both values get a special "conflict" fact that is
+    /// never satisfied.
+    pub fn merge_facts(&mut self, a: Value, b: Value) {
+        let a = self.resolve_aliases(a);
+        let b = self.resolve_aliases(b);
+        match (&self.facts[a], &self.facts[b]) {
+            (Some(a), Some(b)) if a == b => { /* nothing */ }
+            (None, None) => { /* nothing */ }
+            (Some(a), None) => {
+                self.facts[b] = Some(a.clone());
+            }
+            (None, Some(b)) => {
+                self.facts[a] = Some(b.clone());
+            }
+            (Some(a_fact), Some(b_fact)) => {
+                assert_eq!(self.value_type(a), self.value_type(b));
+                let merged = Fact::intersect(a_fact, b_fact);
+                if let (Fact::Def { value: x }, Fact::Def { value: y }) = (a_fact, b_fact) {
+                    let (lo, hi) = if x < y { (*x, *y) } else { (*y, *x) };
+                    if lo != hi {
+                        self.fact_symbol_aliases[hi] = Some(lo);
+                    }
+                }
+                if merged == Fact::Conflict {
+                    log::debug!("pcc: facts merge on {a} and {b}: {a_fact:?}, {b_fact:?} -> conflict");
+                }
+                crate::trace!(
+                    "facts merge on {} and {}: {:?}, {:?} -> {:?}",
+                    a,
+                    b,
+                    a_fact,
+                    b_fact,
+                    merged,
+                );
+                self.facts[a] = Some(merged.clone());
+                self.facts[b] = Some(merged);
+            }
+        }
     }
 }
 

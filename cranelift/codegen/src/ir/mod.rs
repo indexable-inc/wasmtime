@@ -20,6 +20,8 @@ pub(crate) mod known_symbol;
 pub mod layout;
 pub(crate) mod libcall;
 mod memflags;
+mod memtype;
+pub mod pcc;
 mod progpoint;
 mod sourceloc;
 pub mod stackslot;
@@ -40,7 +42,8 @@ pub use crate::ir::dfg::{BlockData, DataFlowGraph, ValueDef};
 pub use crate::ir::dynamic_type::{DynamicTypeData, DynamicTypes, dynamic_to_fixed};
 pub use crate::ir::entities::{
     Block, Constant, DynamicStackSlot, DynamicType, ExceptionTable, ExceptionTag, FuncRef,
-    GlobalValue, Immediate, Inst, JumpTable, SigRef, StackSlot, UserExternalNameRef, Value,
+    GlobalValue, Immediate, Inst, JumpTable, MemoryType, SigRef, StackSlot, UserExternalNameRef,
+    Value,
 };
 pub use crate::ir::exception_table::{ExceptionTableData, ExceptionTableItem};
 pub use crate::ir::extfunc::{
@@ -60,6 +63,8 @@ pub use crate::ir::memflags::{
     AliasRegion, AliasRegionData, AliasRegionSet, Endianness, MachMemFlags, MemFlags, MemFlagsData,
     MemFlagsSet,
 };
+pub use crate::ir::memtype::{MemoryTypeData, MemoryTypeField};
+pub use crate::ir::pcc::{BaseExpr, Expr, Fact, FactContext, PccError, PccResult};
 pub use crate::ir::progpoint::ProgramPoint;
 pub use crate::ir::sourceloc::MaybeRelSourceLoc;
 pub use crate::ir::sourceloc::RelSourceLoc;

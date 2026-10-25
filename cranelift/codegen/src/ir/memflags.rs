@@ -224,6 +224,7 @@ impl MemFlagsData {
             }
             "can_move" => self.with_can_move(),
             "volatile" => self.with_volatile(),
+            "checked" => self.with_checked(),
 
             other => match TrapCode::from_str(other) {
                 Ok(code) => self.with_trap_code(Some(code)),
@@ -377,6 +378,30 @@ impl MemFlagsData {
     /// Set the `volatile` flag, returning new flags.
     pub const fn with_volatile(mut self) -> Self {
         self.flags = self.flags.with_volatile();
+        self
+    }
+
+    /// Test if the `checked` bit is set.
+    ///
+    /// Loads and stores with this flag are verified to access pointers only
+    /// with a validated `PointsTo` fact attached, and with that fact
+    /// validated, when using the proof-carrying-code framework. If initial
+    /// facts on program inputs are correct (i.e., correctly denote the shape
+    /// and types of data structures in memory), and if PCC validates the
+    /// compiled output, then all `checked`-marked memory accesses are
+    /// guaranteed (up to the checker's correctness) to access valid memory.
+    pub const fn checked(self) -> bool {
+        self.flags.checked()
+    }
+
+    /// Set the `checked` bit.
+    pub fn set_checked(&mut self) {
+        *self = self.with_checked();
+    }
+
+    /// Set the `checked` bit, returning new flags.
+    pub const fn with_checked(mut self) -> Self {
+        self.flags = self.flags.with_checked();
         self
     }
 
