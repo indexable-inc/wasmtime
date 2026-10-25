@@ -324,9 +324,18 @@ impl FuncEnvironment<'_> {
         let small = b.create_block();
         let join = b.create_block();
         b.set_cold_block(big);
+        // Compare the zero-extended length: the same pure `uextend` the bounds
+        // checks and upstream's lowering compute, so the egraph merges them
+        // and the split keeps no extra value live (on aarch64 one more value
+        // than upstream's spills a tight loop's state to the stack).
+        let len64 = if b.func.dfg.value_type(len) == I64 {
+            len
+        } else {
+            b.ins().uextend(I64, len)
+        };
         let is_big = b.ins().icmp_imm_u(
             IntCC::UnsignedGreaterThanOrEqual,
-            len,
+            len64,
             i64::try_from(LOOP_MIN).unwrap(),
         );
         b.ins().brif(is_big, big, &[], small, &[]);
