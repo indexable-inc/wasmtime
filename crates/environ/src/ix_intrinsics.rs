@@ -25,7 +25,7 @@ pub const IX_INTRINSIC_MODULE: &str = "ix";
 #[macro_export]
 macro_rules! ix_intrinsics_abi {
     () => {
-        3
+        5
     };
 }
 
@@ -42,6 +42,9 @@ macro_rules! ix_intrinsics_abi {
 ///   nonzero) instead of a page whose load faults. An `ix2` artifact would
 ///   still load against an `ix3` runtime but could never be interrupted, so
 ///   it must not load.
+/// - 4: taken by the ix-indirect branch.
+/// - 5: ix bulk builtins (`ix_bulk_copy`, `ix_bulk_fill`, appended to the
+///   builtin list) and the `ix_bulk_*` tunables.
 pub const IX_INTRINSICS_ABI: u32 = ix_intrinsics_abi!();
 
 macro_rules! intrinsics {

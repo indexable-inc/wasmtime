@@ -215,6 +215,35 @@ define_tunables! {
         /// Kept last
         /// so the fork's fields stay after upstream's.
         pub poll_interruption: bool,
+
+        /// ix bulk memory (indexable fork): how `memory.copy` and
+        /// `memory.fill` are compiled for memories whose bounds checks are
+        /// elided (see `crates/cranelift/src/func_environ/ix_bulk.rs`).
+        ///
+        /// - 0: upstream: one unbounded libcall (`memmove`/`memset`) per op.
+        /// - 1: inline up to 64 bytes; one upstream libcall up to 2 MiB; from
+        ///   2 MiB a loop of host steps (each step is the whole remainder if it is under 2 MiB, so at most 2 MiB - 1 B, else 1 MiB) with the epoch and/or poll check between
+        ///   steps, so a long op is preemptible.
+        /// - 2: as 1, and the host may use `rep movsb` (far ascending copies
+        ///   of at least `ix_bulk_rep_min` bytes) or `rep stosb` (fills of at
+        ///   least `max(ix_bulk_rep_min, 1 MiB)`) on x86 hosts with ERMS; the
+        ///   loop then starts at that size.
+        /// - 3 (x86_64 default): as 2 without the inline small path (compact
+        ///   sites).
+        /// - 4 (aarch64 default): upstream's lowering (as 0) below 2 MiB, one
+        ///   compare and branch per op, and the preemptible loop (no `rep`)
+        ///   from 2 MiB.
+        ///
+        /// Values above 4 are rejected by `Config::ix_bulk_inline`.
+        ///
+        /// After the fork's other fields. Field order does not guard old
+        /// artifacts (they are rejected by the `+ixN` version string and the
+        /// `IX_INTRINSICS_ABI` in their metadata, bumped to 5 for this).
+        pub ix_bulk_inline: u8,
+
+        /// The smallest op, in bytes, that modes 2 and 3 let the host run with
+        /// `rep movsb` or `rep stosb`; 0 disables them.
+        pub ix_bulk_rep_min: u32,
     }
 
     pub struct ConfigTunables {
@@ -249,6 +278,14 @@ impl Tunables {
             PointerWidth::U64 => Tunables::default_u64(),
             _ => bail!("unsupported target pointer width"),
         };
+
+        // ix bulk: mode 3's checks cost about 0.9 ns per small op on
+        // Graviton (callee-saved register pressure), so aarch64 keeps
+        // upstream's lowering and only takes the preemptible loop for large
+        // ops (wasm-host bench/results/2026-10-25-bulk-inline).
+        if matches!(target.architecture, target_lexicon::Architecture::Aarch64(_)) {
+            ret.ix_bulk_inline = 4;
+        }
 
         // Pulley targets never use signals-based-traps and also can't benefit
         // from guard pages, so disable them.
@@ -305,6 +342,8 @@ impl Tunables {
             branch_hinting: false,
             debug_symbols: true,
             poll_interruption: false,
+            ix_bulk_inline: 3,
+            ix_bulk_rep_min: 32768,
         }
     }
 

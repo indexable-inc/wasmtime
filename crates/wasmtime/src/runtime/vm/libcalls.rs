@@ -394,6 +394,149 @@ unsafe fn memory_fill(
     }
 }
 
+/// ix bulk memory (indexable fork): the size of one step of a long
+/// `memory.copy`/`memory.fill`. Wasm checks the epoch and/or poll word between steps
+/// (crates/cranelift/src/func_environ/ix_bulk.rs), so this bounds how long an
+/// op runs without a preemption point.
+const IX_BULK_CHUNK: usize = 1 << 20;
+
+/// `rep stosb` beats glibc's memset only from about 1 MiB on Zen 5
+/// (wasm-host bench/results/2026-10-25-bulk-inline).
+const IX_BULK_FILL_REP_MIN: usize = 1 << 20;
+
+/// The next step of `len - done` remaining bytes: all of them below two
+/// chunks (so at most 2 MiB - 1 B), else one chunk (1 MiB) (so no step is shorter than a chunk unless it is
+/// the whole remainder). Compiled code only passes back the `done` a step
+/// returned, but a `done >= len` would still yield a zero-length step rather
+/// than wrap.
+fn ix_bulk_step(len: usize, done: usize) -> usize {
+    let rem = len.saturating_sub(done);
+    if rem >= 2 * IX_BULK_CHUNK {
+        IX_BULK_CHUNK
+    } else {
+        rem
+    }
+}
+
+/// Whether the host has ERMS (fast `rep movsb`/`rep stosb`).
+fn ix_has_erms() -> bool {
+    #[cfg(all(target_arch = "x86_64", feature = "std"))]
+    {
+        std::arch::is_x86_feature_detected!("ermsb")
+    }
+    #[cfg(not(all(target_arch = "x86_64", feature = "std")))]
+    {
+        false
+    }
+}
+
+/// ix bulk memory: one step of a `memory.copy` of `len` bytes from `src` to
+/// `dst`, `done` of which are copied (`done < len`). Steps ascend when that
+/// is a correct memmove (`dst - src >= len`, unsigned: dst below src or past
+/// its end) and descend from the end otherwise, each step itself a memmove.
+/// Ascending steps of an op of at least `rep_min` bytes (`rep_min > 0`) whose
+/// src is at least 64 bytes above dst (or disjoint) use `rep movsb` on ERMS
+/// hosts. Returns the new `done`.
+///
+/// # Safety
+///
+/// `[dst, dst + len)` and `[src, src + len)` are bounds-checked ranges of
+/// linear memories (wasm checked them before the first step), as for
+/// `memory_copy`.
+unsafe fn ix_bulk_copy(
+    _store: &mut dyn VMStore,
+    _instance: InstanceId,
+    dst: *mut u8,
+    src: *mut u8,
+    len: usize,
+    done: usize,
+    rep_min: usize,
+) -> usize {
+    if done >= len {
+        return len;
+    }
+    let c = ix_bulk_step(len, done);
+    let fwd = (dst as usize).wrapping_sub(src as usize) >= len;
+    let off = if fwd { done } else { len - done - c };
+    let d = dst.wrapping_add(off);
+    let s = src.wrapping_add(off).cast_const();
+    #[cfg(target_arch = "x86_64")]
+    if fwd
+        && rep_min != 0
+        && len >= rep_min
+        && (src as usize).wrapping_sub(dst as usize) >= 64
+        && ix_has_erms()
+    {
+        // SAFETY: both ranges are in bounds (above); copying ascending byte
+        // by byte, which `rep movsb` is defined as, is a correct memmove
+        // here because dst is below src or the ranges are disjoint. The
+        // direction flag is clear per the ABI.
+        unsafe {
+            core::arch::asm!(
+                "rep movsb",
+                inout("rcx") c => _,
+                inout("rdi") d => _,
+                inout("rsi") s => _,
+                options(nostack, preserves_flags),
+            );
+        }
+        return done + c;
+    }
+    // FIXME(#4203): as for `memory_copy`, not sound in the presence of
+    // shared memories.
+    unsafe { s.copy_to(d, c) }
+    done + c
+}
+
+/// ix bulk memory: one ascending step of a `memory.fill` of `len` bytes at
+/// `dst` with the low byte of `val`, `done` of which are written (`done <
+/// len`). Ops of at least `max(rep_min, 1 MiB)` bytes (`rep_min > 0`) use
+/// `rep stosb` on ERMS hosts. Returns the new `done`.
+///
+/// # Safety
+///
+/// `[dst, dst + len)` is a bounds-checked range of a linear memory, as for
+/// `memory_fill`.
+unsafe fn ix_bulk_fill(
+    _store: &mut dyn VMStore,
+    _instance: InstanceId,
+    dst: *mut u8,
+    val: u32,
+    len: usize,
+    done: usize,
+    rep_min: usize,
+) -> usize {
+    if done >= len {
+        return len;
+    }
+    let c = ix_bulk_step(len, done);
+    let d = dst.wrapping_add(done);
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "memory.fill stores the low byte of its value"
+    )]
+    let byte = val as u8;
+    #[cfg(target_arch = "x86_64")]
+    if rep_min != 0 && len >= rep_min.max(IX_BULK_FILL_REP_MIN) && ix_has_erms() {
+        // SAFETY: the range is in bounds (above); the direction flag is
+        // clear per the ABI.
+        unsafe {
+            core::arch::asm!(
+                "rep stosb",
+                inout("rcx") c => _,
+                inout("rdi") d => _,
+                in("al") byte,
+                options(nostack, preserves_flags),
+            );
+        }
+        return done + c;
+    }
+    // FIXME(#4203): as for `memory_fill`, not sound in the presence of
+    // shared memories.
+    unsafe { d.write_bytes(byte, c) }
+    done + c
+}
+
 // Implementation of `ref.func`.
 fn ref_func(store: &mut dyn VMStore, instance: InstanceId, func_index: u32) -> NonNull<u8> {
     let (instance, registry) = store.instance_and_module_registry_mut(instance);

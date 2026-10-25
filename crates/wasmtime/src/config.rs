@@ -128,7 +128,7 @@ impl ModuleVersionStrategy {
             // every field after `epoch_ptr`, so an `ix1` artifact must not
             // load. 3 changed what a poll does with that pointer (test a
             // word, not fault on a page): an `ix2` artifact would never be
-            // interrupted.
+            // interrupted. 5 added the ix bulk builtins (4 is ix-indirect's).
             Self::WasmtimeVersion => concat!(
                 env!("CARGO_PKG_VERSION_MAJOR"),
                 "+ix",
@@ -2270,6 +2270,23 @@ impl Config {
         self
     }
 
+    /// ix bulk memory (indexable fork): how `memory.copy` and `memory.fill`
+    /// with a dynamic length are compiled. See
+    /// `wasmtime_environ::Tunables::ix_bulk_inline` for the modes (0 is
+    /// upstream's libcall; the default is 3 on x86_64 and 4 on aarch64).
+    /// `Engine::new` rejects a mode above 4.
+    pub fn ix_bulk_inline(&mut self, mode: u8) -> &mut Self {
+        self.tunables.ix_bulk_inline = Some(mode);
+        self
+    }
+
+    /// ix bulk memory: the smallest op, in bytes, that modes 2 and 3 let the host
+    /// run with `rep movsb`/`rep stosb` on x86 hosts with ERMS (0: never).
+    pub fn ix_bulk_rep_min(&mut self, bytes: u32) -> &mut Self {
+        self.tunables.ix_bulk_rep_min = Some(bytes);
+        self
+    }
+
     /// Configure the version information used in serialized and deserialized [`crate::Module`]s.
     /// This effects the behavior of [`crate::Module::serialize()`], as well as
     /// [`crate::Module::deserialize()`] and related functions.
@@ -2953,6 +2970,13 @@ impl Config {
 
         if tunables.debug_native && !tunables.debug_symbols {
             bail!("cannot enable native debug info while debug symbols are disabled");
+        }
+
+        if tunables.ix_bulk_inline > 4 {
+            bail!(
+                "ix_bulk_inline mode {} is not one of 0..=4",
+                tunables.ix_bulk_inline
+            );
         }
 
         if tunables.poll_interruption {

@@ -1,4 +1,5 @@
 mod gc;
+mod ix_bulk;
 pub(crate) mod stack_switching;
 
 use crate::alias_region::{AliasRegions, GcAccess};
@@ -236,6 +237,11 @@ pub struct FuncEnvironment<'module_environment> {
     /// function prologue and kept in a register like `epoch_ptr_var`.
     poll_ptr_var: cranelift_frontend::Variable,
 
+    /// ix bulk mode 4 (`func_environ/ix_bulk.rs`, `ix_bulk_split`): set while
+    /// translating the upstream arm (gate off) or the stepped arm of a split.
+    ix_bulk_bypass: bool,
+    ix_bulk_in_split: bool,
+
     fuel_consumed: i64,
 
     /// A stack limit for when signals-based traps are disabled.
@@ -320,6 +326,8 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             epoch_deadline_var: Variable::reserved_value(),
             epoch_ptr_var: Variable::reserved_value(),
             poll_ptr_var: Variable::reserved_value(),
+            ix_bulk_bypass: false,
+            ix_bulk_in_split: false,
 
             // Start with at least one fuel being consumed because even empty
             // functions should consume at least some fuel.
@@ -3917,6 +3925,23 @@ impl FuncEnvironment<'_> {
         let entity = entity.into();
         let idx_type = entity.index_type(self);
 
+        // ix bulk: small memory fills inline, large ones in preemptible
+        // steps (`func_environ/ix_bulk.rs`).
+        if let CheckedEntity::Memory(m) = entity
+            && self.ix_bulk_enabled(builder.func, m)
+        {
+            let const_n = Self::value_as_const_int(builder, len);
+            if self.ix_bulk_wants_split() {
+                return self.ix_bulk_split(builder, len, const_n, |this, b| {
+                    this.translate_entity_fill(b, entity, dst, val, len)
+                });
+            }
+            let (d, oob) = self.entity_bounds_check_inner(builder, entity, dst, len, true)?;
+            let n =
+                self.unchecked_cast_wasm_addr_to_native_addr(&mut builder.cursor(), len, idx_type);
+            return self.ix_bulk_fill(builder, m, d, val, n, oob, const_n);
+        }
+
         // Bounds check `dst+len` and convert it to a raw heap address.
         let raw_dst_addr = self.translate_entity_bounds_check(builder, entity, dst, len)?;
 
@@ -4273,6 +4298,32 @@ impl FuncEnvironment<'_> {
             builder.ins().uextend(I64, len)
         };
 
+        // ix bulk: a memory-to-memory copy with a dynamic length (or a
+        // constant one too long for upstream's inline copy) is compiled by
+        // `func_environ/ix_bulk.rs`, with one trap for both ranges.
+        let const_n = Self::value_as_const_int(builder, len);
+        if let (CheckedEntity::Memory(dm), CheckedEntity::Memory(sm)) = (dst_entity, src_entity)
+            && const_n.is_none_or(|n| n > 128)
+            && self.ix_bulk_enabled(builder.func, dm)
+            && self.ix_bulk_enabled(builder.func, sm)
+        {
+            if self.ix_bulk_wants_split() {
+                return self.ix_bulk_split(builder, len, const_n, |this, b| {
+                    this.translate_entity_copy(b, dst_entity, src_entity, dst, src, len)
+                });
+            }
+            let (d, d_oob) = self.entity_bounds_check_inner(builder, dst_entity, dst, dst_len, false)?;
+            let (s, s_oob) = self.entity_bounds_check_inner(builder, src_entity, src, src_len, false)?;
+            let oob = builder.ins().bor(d_oob, s_oob);
+            self.trapnz(builder, oob, dst_entity.oob_trap_code());
+            let n = self.unchecked_cast_wasm_addr_to_native_addr(
+                &mut builder.cursor(),
+                len,
+                len_idx_ty,
+            );
+            return self.ix_bulk_copy(builder, dm, sm, d, s, n, oob, const_n);
+        }
+
         // Perform a bounds check for the src/dst entities and compute the raw
         // heap addresses at the same time.
         let dst_raw_addr = self.translate_entity_bounds_check(builder, dst_entity, dst, dst_len)?;
@@ -4345,7 +4396,21 @@ impl FuncEnvironment<'_> {
         idx: ir::Value,
         len: ir::Value,
     ) -> WasmResult<ir::Value> {
-        let entity = entity.into();
+        let (addr, _oob) = self.entity_bounds_check_inner(builder, entity.into(), idx, len, true)?;
+        Ok(addr)
+    }
+
+    /// `translate_entity_bounds_check`, also returning the `i8` out-of-bounds
+    /// flag. With `trap: false` the caller must trap on that flag itself
+    /// (ix bulk: one trap for both ranges of a `memory.copy`).
+    fn entity_bounds_check_inner(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        entity: CheckedEntity,
+        idx: ir::Value,
+        len: ir::Value,
+        trap: bool,
+    ) -> WasmResult<(ir::Value, ir::Value)> {
         let pointer_type = self.pointer_type();
         let idx_type = entity.index_type(self);
         let idx_clif_type = index_type_to_ir_type(idx_type);
@@ -4422,10 +4487,12 @@ impl FuncEnvironment<'_> {
         // This is the actual bounds check that verifies that this operation is
         // in-bounds. Once control flow gets past here we know that nothing can
         // overflow and everything is in-bounds.
-        let inbounds = builder
+        let oob = builder
             .ins()
             .icmp(IntCC::UnsignedGreaterThan, end64, entity_size64);
-        self.trapnz(builder, inbounds, trap_code);
+        if trap {
+            self.trapnz(builder, oob, trap_code);
+        }
 
         // Compute the actual raw heap address to return
         let base = match entity {
@@ -4494,7 +4561,7 @@ impl FuncEnvironment<'_> {
                 builder.ins().imul_imm_s(idx, i64::from(elem_size))
             }
         };
-        Ok(builder.ins().iadd(base, byte_offset))
+        Ok((builder.ins().iadd(base, byte_offset), oob))
     }
 
     fn load_runtime_data_length(

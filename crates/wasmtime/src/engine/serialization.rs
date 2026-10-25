@@ -369,6 +369,14 @@ impl Metadata<'_> {
             // Only affects cold-block layout; a compiled artifact loads into an
             // engine configured either way.
             branch_hinting: _,
+
+            // ix bulk: only picks how memory.copy/fill are lowered. Every
+            // lowering is correct under the memory settings checked above (the
+            // inline path is gated on them at compile time), and `rep movsb`
+            // runs on any x86-64 (ERMS only makes it fast), so an artifact
+            // loads into an engine configured either way.
+            ix_bulk_inline: _,
+            ix_bulk_rep_min: _,
         } = self.tunables;
 
         Self::check_collector(collector, other.collector)?;

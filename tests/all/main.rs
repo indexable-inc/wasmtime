@@ -39,6 +39,7 @@ mod intrinsics;
 mod invoke_func_via_table;
 mod limits;
 mod linker;
+mod ix_bulk;
 mod memory;
 mod memory_creator;
 mod missing_async;

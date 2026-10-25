@@ -194,6 +194,16 @@ macro_rules! foreach_builtin_function {
             asan_start_switch_fiber(vmctx: vmctx, fake_stack_save: pointer, target_csi: pointer);
             #[cfg(feature = "stack-switching")]
             asan_finish_switch_fiber(vmctx: vmctx, fake_stack: pointer);
+
+            // ix bulk memory (indexable fork; kept last so no upstream
+            // builtin's index moves): one step of a
+            // bounds-checked `memory.copy` of `len` bytes of which `done`
+            // are copied (the whole remainder under 2 MiB, else 1 MiB);
+            // returns the new `done`. `rep_min` 0 never uses
+            // `rep movsb` (crates/cranelift/src/func_environ/ix_bulk.rs).
+            ix_bulk_copy(vmctx: vmctx, dst: pointer, src: pointer, len: size, done: size, rep_min: size) -> size;
+            // ix bulk memory: the same for `memory.fill`.
+            ix_bulk_fill(vmctx: vmctx, dst: pointer, val: u32, len: size, done: size, rep_min: size) -> size;
         }
     };
 }
@@ -427,6 +437,8 @@ impl BuiltinFunctionIndex {
             (@get fma_f64x2 f64x2) => (return None);
             (@get passive_data_segment_base pointer) => (return None);
             (@get passive_elem_segment_len size) => (return None);
+            (@get ix_bulk_copy size) => (return None);
+            (@get ix_bulk_fill size) => (return None);
             (@get passive_elem_segment_base pointer) => (return None);
 
             (@get cont_new pointer) => (TrapSentinel::Negative);
