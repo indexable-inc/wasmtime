@@ -17,10 +17,15 @@ use serde_derive::{Deserialize, Serialize};
 /// The reserved import module.
 pub const IX_INTRINSIC_MODULE: &str = "ix";
 
-/// Version of the intrinsic set and its semantics. Part of the engine's
-/// compatibility hash, so artifacts compiled against another version are
-/// rejected.
-pub const IX_INTRINSICS_ABI: u32 = 1;
+/// Version of the fork's ABI: the intrinsic set and its semantics, and the
+/// fork's changes to the vmctx layout. Part of the engine's compatibility
+/// hash, and the `+ixN` suffix of the `.cwasm` version string
+/// (`ModuleVersionStrategy::as_str`, keep the two in step), so artifacts
+/// compiled against another version are rejected.
+///
+/// - 1: `ix` intrinsics.
+/// - 2: vmctx `poll_ptr` after `epoch_ptr` (poll-page interruption).
+pub const IX_INTRINSICS_ABI: u32 = 2;
 
 macro_rules! intrinsics {
     ($($(#[$doc:meta])* $variant:ident $name:literal ($($p:ident),*) -> ($($r:ident),*);)*) => {

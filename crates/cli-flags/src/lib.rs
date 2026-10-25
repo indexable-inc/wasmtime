@@ -404,6 +404,10 @@ wasmtime_option_group! {
         /// Yield when a global epoch counter changes, allowing for async
         /// operation without blocking the executor.
         pub epoch_interruption: Option<bool>,
+        /// Interrupt with a per-store poll page instead of epochs (ix fork):
+        /// one load at each function entry and loop header, which faults once
+        /// the host revokes the page.
+        pub poll_interruption: Option<bool>,
         /// Maximum stack size, in bytes, that wasm is allowed to consume before a
         /// stack overflow is reported.
         pub max_wasm_stack: Option<usize>,
@@ -1083,6 +1087,9 @@ impl CommonOptions {
         if let Some(enable) = self.wasm.epoch_interruption {
             config.epoch_interruption(enable);
         }
+        if let Some(enable) = self.wasm.poll_interruption {
+            config.poll_interruption(enable);
+        }
         if let Some(enable) = self.debug.address_map {
             config.generate_address_map(enable);
         }
@@ -1572,6 +1579,7 @@ impl CommonOptions {
                 wide_arithmetic: Some(features.contains(WasmFeatures::WIDE_ARITHMETIC)),
                 concurrency_support: Some(engine.get_concurrency_support()),
                 epoch_interruption: Some(engine.get_epoch_interruption()),
+                poll_interruption: Some(engine.get_poll_interruption()),
                 fuel: if engine.get_consume_fuel() {
                     Some(1)
                 } else {

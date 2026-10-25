@@ -22,7 +22,7 @@ fn interrupt_after(h: InterruptHandle, after: Duration) -> std::thread::JoinHand
     std::thread::spawn(move || {
         std::thread::sleep(after);
         let t = Instant::now();
-        h.interrupt();
+        h.interrupt().unwrap();
         t
     })
 }
@@ -87,9 +87,9 @@ fn out_of_bounds_is_still_a_memory_trap() -> Result<()> {
     assert_eq!(trap(&err), Trap::MemoryOutOfBounds);
     // And with the poll page revoked, the poll at entry wins and says so.
     let h = store.interrupt_handle().unwrap();
-    h.interrupt();
+    h.interrupt().unwrap();
     assert_eq!(trap(&run.call(&mut store, 1 << 20).unwrap_err()), Trap::Interrupt);
-    assert!(h.rearm());
+    assert!(h.rearm().unwrap());
     assert_eq!(trap(&run.call(&mut store, 1 << 20).unwrap_err()), Trap::MemoryOutOfBounds);
     Ok(())
 }
@@ -101,13 +101,13 @@ fn interrupt_before_call_traps_at_entry_and_rearm_resumes() -> Result<()> {
     let mut store = Store::new(&engine, ());
     let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), i32>(&mut store, "run")?;
     let h = store.interrupt_handle().unwrap();
-    assert!(!h.rearm());
-    h.interrupt();
-    h.interrupt();
+    assert!(!h.rearm().unwrap());
+    h.interrupt().unwrap();
+    h.interrupt().unwrap();
     assert!(h.is_interrupted());
     assert_eq!(trap(&run.call(&mut store, ()).unwrap_err()), Trap::Interrupt);
-    assert!(h.rearm());
-    assert!(!h.rearm());
+    assert!(h.rearm().unwrap());
+    assert!(!h.rearm().unwrap());
     assert_eq!(run.call(&mut store, ())?, 7);
     Ok(())
 }
@@ -149,13 +149,13 @@ fn stores_are_independent_across_threads() -> Result<()> {
     let (ha, a) = spawn(engine.clone(), module.clone());
     let (hb, b) = spawn(engine.clone(), module.clone());
     std::thread::sleep(Duration::from_millis(20));
-    ha.interrupt();
+    ha.interrupt().unwrap();
     let (ta, at) = a.join().unwrap();
     assert_eq!(ta, Trap::Interrupt);
     // B keeps running after A stopped.
     std::thread::sleep(Duration::from_millis(50));
     assert!(!b.is_finished());
-    hb.interrupt();
+    hb.interrupt().unwrap();
     let (tb, bt) = b.join().unwrap();
     assert_eq!(tb, Trap::Interrupt);
     assert!(bt > at + Duration::from_millis(40));
@@ -186,7 +186,7 @@ fn pooling_slot_reuse_polls_the_new_store() -> Result<()> {
         let mut a = Store::new(&engine, ());
         let run = Instance::new(&mut a, &module, &[])?.get_typed_func::<i32, i32>(&mut a, "run")?;
         let h = a.interrupt_handle().unwrap();
-        h.interrupt();
+        h.interrupt().unwrap();
         assert_eq!(trap(&run.call(&mut a, 10).unwrap_err()), Trap::Interrupt);
         h
     };
@@ -196,9 +196,9 @@ fn pooling_slot_reuse_polls_the_new_store() -> Result<()> {
     assert!(old.is_interrupted());
     assert_eq!(run.call(&mut b, 1000)?, 1000);
     // Interrupting the dead store's handle does nothing to B.
-    old.interrupt();
+    old.interrupt().unwrap();
     assert_eq!(run.call(&mut b, 1000)?, 1000);
-    b.interrupt_handle().unwrap().interrupt();
+    b.interrupt_handle().unwrap().interrupt().unwrap();
     assert_eq!(trap(&run.call(&mut b, 1000).unwrap_err()), Trap::Interrupt);
     Ok(())
 }
@@ -218,5 +218,79 @@ fn config_and_artifacts() -> Result<()> {
     assert!(unsafe { Module::deserialize(&plain, &bytes) }.is_err());
     // No handle without the feature.
     assert!(Store::new(&plain, ()).interrupt_handle().is_none());
+    Ok(())
+}
+
+#[test]
+fn only_x86_64_and_aarch64_targets() -> Result<()> {
+    // riscv64 and s390x lower `atomic_load` without its trap code, so a poll
+    // fault there would not be recognised as a trap.
+    for target in ["riscv64gc-unknown-linux-gnu", "s390x-unknown-linux-gnu"] {
+        let mut c = Config::new();
+        c.poll_interruption(true).target(target)?;
+        let err = Engine::new(&c).map(|_| ()).unwrap_err().to_string();
+        assert!(err.contains("only supported on x86_64 and aarch64"), "{target}: {err}");
+    }
+    for target in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"] {
+        let mut c = Config::new();
+        c.poll_interruption(true).target(target)?;
+        Engine::new(&c)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn pages_are_reused_not_remapped() -> Result<()> {
+    let engine = engine(|_| {});
+    let module = Module::new(&engine, SPIN)?;
+    let (mapped0, _, quarantined0) = InterruptHandle::arena_stats();
+    // Interrupted and then dropped, store after store: each page is re-armed
+    // and goes back on the free list instead of being unmapped.
+    for _ in 0..5000 {
+        let mut store = Store::new(&engine, ());
+        let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), ()>(&mut store, "run")?;
+        let h = store.interrupt_handle().unwrap();
+        h.interrupt()?;
+        assert_eq!(trap(&run.call(&mut store, ()).unwrap_err()), Trap::Interrupt);
+    }
+    let (mapped1, _, quarantined1) = InterruptHandle::arena_stats();
+    // Other tests in this process map pages too, but nothing like 5000.
+    assert!(mapped1 - mapped0 < 1000, "arena grew from {mapped0} to {mapped1} pages");
+    assert_eq!(quarantined1, quarantined0);
+    // A store that gets a recycled page runs normally.
+    let mut store = Store::new(&engine, ());
+    let module = Module::new(&engine, r#"(module (func (export "run") (result i32) i32.const 7))"#)?;
+    let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), i32>(&mut store, "run")?;
+    assert_eq!(run.call(&mut store, ())?, 7);
+    Ok(())
+}
+
+#[test]
+fn start_function_is_interruptible() -> Result<()> {
+    // A `start` that never returns: instantiation must be preemptible too.
+    let engine = engine(|_| {});
+    let module = Module::new(&engine, r#"(module (func $s (loop br 0)) (start $s))"#)?;
+    let mut store = Store::new(&engine, ());
+    let t = interrupt_after(store.interrupt_handle().unwrap(), Duration::from_millis(20));
+    let err = Instance::new(&mut store, &module, &[]).map(|_| ()).unwrap_err();
+    t.join().unwrap();
+    assert_eq!(trap(&err), Trap::Interrupt);
+    Ok(())
+}
+
+#[test]
+fn artifact_from_older_fork_abi_is_rejected() -> Result<()> {
+    // ix2 moved every vmctx field after `epoch_ptr`. An artifact stamped with
+    // the old `+ix1` version must be refused before any of its code runs.
+    let engine = engine(|_| {});
+    let mut bytes = engine.precompile_module(SPIN.as_bytes())?;
+    let at = bytes
+        .windows(4)
+        .position(|w| w == b"+ix2")
+        .expect("the artifact carries the +ix2 version");
+    bytes[at..at + 4].copy_from_slice(b"+ix1");
+    let err = unsafe { Module::deserialize(&engine, &bytes) }.map(|_| ()).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(msg.contains("+ix1") && msg.contains("incompatible"), "{msg}");
     Ok(())
 }

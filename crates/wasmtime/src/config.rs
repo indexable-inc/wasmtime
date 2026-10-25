@@ -105,7 +105,11 @@ impl Default for ModuleVersionStrategy {
 impl core::hash::Hash for ModuleVersionStrategy {
     fn hash<H: core::hash::Hasher>(&self, hasher: &mut H) {
         match self {
-            Self::WasmtimeVersion => env!("CARGO_PKG_VERSION").hash(hasher),
+            Self::WasmtimeVersion => {
+                env!("CARGO_PKG_VERSION").hash(hasher);
+                // The fork ABI suffix, so cache keys change with it too.
+                self.as_str().hash(hasher);
+            }
             Self::Custom(s) => s.hash(hasher),
             Self::None => {}
         };
@@ -116,9 +120,13 @@ impl ModuleVersionStrategy {
     /// Get the string-encoding version of the module.
     pub fn as_str(&self) -> &str {
         match &self {
-            // `+ix1`: the indexable fork's `ix` intrinsics, version
-            // `wasmtime_environ::IX_INTRINSICS_ABI` (keep the two in step).
-            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix1"),
+            // `+ixN`: the indexable fork's ABI, version
+            // `wasmtime_environ::IX_INTRINSICS_ABI` (keep the two in step):
+            // the `ix` intrinsics and the fork's vmctx layout. 2 added the
+            // vmctx `poll_ptr` field (poll-page interruption), which moved
+            // every field after `epoch_ptr`, so an `ix1` artifact must not
+            // load.
+            Self::WasmtimeVersion => concat!(env!("CARGO_PKG_VERSION_MAJOR"), "+ix2"),
             Self::Custom(c) => c,
             Self::None => "",
         }
@@ -2953,6 +2961,16 @@ impl Config {
             if tunables.winch_callable || self.compiler_target().is_pulley() {
                 bail!("poll-page interruption is only implemented for native Cranelift");
             }
+            // Only backends whose `atomic_load` lowering keeps the load's trap
+            // code are allowed: a poll without it would fault with no trap
+            // metadata and crash the process instead of trapping. riscv64
+            // (and s390x) drop the trap code when lowering atomic loads.
+            match self.compiler_target().architecture {
+                target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_) => {}
+                other => bail!(
+                    "poll-page interruption is only supported on x86_64 and aarch64, not {other}"
+                ),
+            }
         }
 
         Ok((tunables, features))
@@ -5151,6 +5169,11 @@ impl Engine {
     /// Returns the configured [`Config::epoch_interruption`] value.
     pub fn get_epoch_interruption(&self) -> bool {
         self.tunables().epoch_interruption
+    }
+
+    /// Returns the configured [`Config::poll_interruption`] value (ix fork).
+    pub fn get_poll_interruption(&self) -> bool {
+        self.tunables().poll_interruption
     }
 
     /// Returns the configured [`Config::consume_fuel`] value.

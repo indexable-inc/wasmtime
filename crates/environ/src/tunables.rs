@@ -99,11 +99,6 @@ define_tunables! {
         /// Whether or not we use epoch-based interruption.
         pub epoch_interruption: bool,
 
-        /// Whether or not we use poll-page interruption: every loop header and
-        /// function entry loads from a per-store poll page, and the host
-        /// interrupts by making that page inaccessible (ix fork).
-        pub poll_interruption: bool,
-
         /// Whether or not linear memories are allowed to be reallocated after
         /// initial allocation at runtime.
         pub memory_may_move: bool,
@@ -213,6 +208,12 @@ define_tunables! {
         /// Whether `metadata.code.branch_hint` sections are parsed and used to
         /// mark cold blocks during compilation.
         pub branch_hinting: bool,
+
+        /// Whether or not we use poll-page interruption: every loop header and
+        /// function entry loads from a per-store poll page, and the host
+        /// interrupts by making that page inaccessible (ix fork). Kept last
+        /// so the fork's fields stay after upstream's.
+        pub poll_interruption: bool,
     }
 
     pub struct ConfigTunables {
@@ -276,7 +277,6 @@ impl Tunables {
             consume_fuel: false,
             operator_cost: OperatorCostStrategy::Default,
             epoch_interruption: false,
-            poll_interruption: false,
             memory_may_move: true,
             guard_before_linear_memory: true,
             table_lazy_init: true,
@@ -303,6 +303,7 @@ impl Tunables {
             metadata_for_gc_heap_corruption: true,
             branch_hinting: false,
             debug_symbols: true,
+            poll_interruption: false,
         }
     }
 
