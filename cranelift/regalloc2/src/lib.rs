@@ -1670,6 +1670,10 @@ pub enum RegAllocError {
     /// Too many operands on a single instruction (beyond limit of
     /// 2^16 - 1).
     TooManyOperands,
+    /// The backtracking allocator used up the work budget given in
+    /// [`RegallocOptions::fuel`] before it finished. The input is valid;
+    /// it is too expensive to allocate within the budget.
+    OutOfFuel,
 }
 
 impl core::fmt::Display for RegAllocError {
@@ -1708,7 +1712,14 @@ pub fn run_with_ctx<'a, F: Function>(
     ctx: &'a mut Ctx,
 ) -> Result<&'a Output, RegAllocError> {
     match options.algorithm {
-        Algorithm::Ion => ion::run(func, env, ctx, options.verbose_log, options.validate_ssa)?,
+        Algorithm::Ion => ion::run(
+            func,
+            env,
+            ctx,
+            options.verbose_log,
+            options.validate_ssa,
+            options.fuel,
+        )?,
         Algorithm::Fastalloc => {
             ctx.output = fastalloc::run(func, env, options.verbose_log, options.validate_ssa)?
         }
@@ -1734,6 +1745,21 @@ pub struct RegallocOptions {
 
     /// The register allocation algorithm to be used.
     pub algorithm: Algorithm,
+
+    /// Work budget for the backtracking allocator (`Algorithm::Ion`), or
+    /// `None` for no limit. Fastalloc ignores it.
+    ///
+    /// The units are abstract steps that grow with the work Ion does:
+    /// liveness-set words built and merged, blocks scanned while building
+    /// ranges and inserting moves, register probes and conflicts visited.
+    /// Several of those are superlinear in the function's size on hostile
+    /// input (many values live across many blocks, or many simultaneously
+    /// live values), so a caller that sets a budget linear in the
+    /// function's size bounds Ion's time and liveness memory linearly.
+    /// When the budget runs out, allocation stops with
+    /// [`RegAllocError::OutOfFuel`]. The count is deterministic: the same
+    /// function and budget always give the same outcome.
+    pub fuel: Option<u64>,
 }
 
 pub(crate) trait VecExt<T> {

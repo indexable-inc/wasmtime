@@ -45,6 +45,32 @@ pub(crate) fn define() -> SettingGroup {
     );
 
     settings.add_enum(
+        "regalloc_budget",
+        "What to do when the backtracking register allocator exceeds its work budget.",
+        r#"
+            The backtracking allocator gets a work budget linear in the size of the
+            function (its instructions, blocks and virtual registers), for both its
+            steps and the words its liveness sets hold. Some of its phases are
+            superlinear on hostile input (many values live across many blocks), and
+            without a budget one function of under 1 MB of wasm can take a minute
+            and 4 GB. The budget is deterministic: the same function always gets
+            the same outcome. Real code uses at most about a sixth of it.
+
+            Supported options:
+
+            - `reject`: fail the compile of that function with
+                        `CodegenError::ImplLimitExceeded`.
+            - `fallback`: allocate that function again with the single-pass
+                          allocator. Its memory stays small, but its time is
+                          still blocks x live values on such input (16k
+                          if/else diamonds: 7 s; 65k: 97 s), so this needs an
+                          outer time limit.
+            - `unbounded`: no budget (upstream behaviour).
+        "#,
+        vec!["reject", "fallback", "unbounded"],
+    );
+
+    settings.add_enum(
         "opt_level",
         "Optimization level for generated code.",
         r#"

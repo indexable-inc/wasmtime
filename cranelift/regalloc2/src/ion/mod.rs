@@ -80,6 +80,37 @@ impl<'a, F: Function> Env<'a, F> {
         Self { func, env, ctx }
     }
 
+    /// Spend `n` units of the work budget. Cheap enough for hot loops; the
+    /// budget is checked separately with [`Self::check_fuel`].
+    #[inline(always)]
+    pub(crate) fn burn(&mut self, n: usize) {
+        self.ctx.fuel = self.ctx.fuel.saturating_sub(n as u64);
+    }
+
+    /// Account for liveness sets growing from `before` to `after` words.
+    /// Their total is blocks x live values on hostile input, so its cap
+    /// bounds Ion's largest memory use; exceeding it spends all fuel.
+    #[inline(always)]
+    pub(crate) fn grow_live_words(&mut self, before: usize, after: usize) {
+        self.ctx.live_words = (self.ctx.live_words + after as u64).saturating_sub(before as u64);
+        if self.ctx.live_words > self.ctx.output.stats.live_words_peak {
+            self.ctx.output.stats.live_words_peak = self.ctx.live_words;
+        }
+        if self.ctx.live_words > self.ctx.max_live_words {
+            self.ctx.fuel = 0;
+        }
+    }
+
+    /// Fail with `OutOfFuel` once the work budget is spent.
+    #[inline(always)]
+    pub(crate) fn check_fuel(&self) -> Result<(), RegAllocError> {
+        if self.ctx.fuel == 0 {
+            Err(RegAllocError::OutOfFuel)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn init(&mut self) -> Result<(), RegAllocError> {
         self.create_pregs_and_vregs();
         self.compute_liveness()?;
@@ -95,15 +126,21 @@ impl<'a, F: Function> Env<'a, F> {
 
     pub(crate) fn run(&mut self) -> Result<Edits, RegAllocError> {
         self.process_bundles()?;
-        self.try_allocating_regs_for_spilled_bundles();
+        self.try_allocating_regs_for_spilled_bundles()?;
         self.allocate_spillslots();
         if trace_enabled!() {
             self.dump_state();
         }
-        let moves = self.apply_allocations_and_insert_moves();
+        let moves = self.apply_allocations_and_insert_moves()?;
         Ok(self.resolve_inserted_moves(moves))
     }
 }
+
+/// The liveness sets may hold one 64-bit word (about 24 bytes in their hash
+/// map form) per this many units of fuel. With Cranelift's budget of 256
+/// fuel per unit of function size that is 16 words, about 400 bytes, per
+/// unit; real functions peak far below it (see Cranelift `compile.rs`).
+const FUEL_PER_LIVE_WORD: u64 = 16;
 
 pub fn run<F: Function>(
     func: &F,
@@ -111,7 +148,9 @@ pub fn run<F: Function>(
     ctx: &mut Ctx,
     enable_annotations: bool,
     enable_ssa_checker: bool,
+    fuel: Option<u64>,
 ) -> Result<(), RegAllocError> {
+    let fuel = fuel.unwrap_or(u64::MAX);
     ctx.cfginfo.init(func, &mut ctx.cfginfo_ctx)?;
 
     if enable_ssa_checker {
@@ -120,9 +159,13 @@ pub fn run<F: Function>(
 
     ctx.annotations_enabled = enable_annotations;
     let mut env = Env::new(func, mach_env, ctx);
-    env.init()?;
-
-    let mut edits = env.run()?;
+    // After `Env::new`, which resets the stats.
+    env.ctx.fuel = fuel;
+    env.ctx.live_words = 0;
+    env.ctx.max_live_words = fuel / FUEL_PER_LIVE_WORD;
+    let result = env.init().and_then(|()| env.run());
+    env.ctx.output.stats.fuel_used = fuel - env.ctx.fuel;
+    let mut edits = result?;
 
     if enable_annotations {
         env.dump_results();
