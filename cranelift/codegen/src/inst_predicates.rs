@@ -16,7 +16,8 @@ fn trivially_has_side_effects(opcode: Opcode) -> bool {
 
 /// Load instructions without the `notrap` flag are defined to trap when
 /// operating on inaccessible memory, so we can't treat them as side-effect-free even if the loaded
-/// value is unused.
+/// value is unused. A `volatile` load must be performed every time it is reached, so it is
+/// side-effecting too.
 #[inline(always)]
 fn is_load_with_defined_trapping(
     opcode: Opcode,
@@ -27,7 +28,10 @@ fn is_load_with_defined_trapping(
         return false;
     }
     match *data {
-        InstructionData::Load { flags, .. } => !dfg.mem_flags[flags].notrap(),
+        InstructionData::Load { flags, .. } => {
+            let flags = dfg.mem_flags[flags];
+            !flags.notrap() || flags.volatile()
+        }
         _ => true,
     }
 }

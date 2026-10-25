@@ -1,258 +1,168 @@
-//! Poll-page interruption (ix fork); see [`Config::poll_interruption`].
+//! Poll interruption (ix fork); see [`Config::poll_interruption`].
 //!
-//! Each [`Store`](crate::Store) owns one page, mapped read-only, whose address
-//! is written into every instance's vmctx. Compiled code loads from it at each
-//! function entry and loop header. [`InterruptHandle::interrupt`] maps it
-//! `PROT_NONE`, so the next poll faults; the trap metadata at that PC says
-//! `Trap::Interrupt`, and the trap path checks that the faulting address is
-//! this store's page (see `trap::from_runtime_box`).
+//! Each [`Store`](crate::Store) owns one *poll cell*: a word on its own
+//! cache line, whose address is written into every instance's vmctx
+//! `poll_ptr`. Compiled code reads the word at every function entry and loop
+//! header with a `volatile` load, which Cranelift never merges, hoists or
+//! deletes, so every poll reads memory afresh.
 //!
-//! # Pages come from an arena and are reused
+//! [`InterruptHandle::interrupt`] is one atomic store into the word: no
+//! syscall, no `mprotect`, no TLB shootdown. What the word means depends on
+//! how the engine compiles polls (`Tunables::poll_variant`, A/B only):
 //!
-//! Pages are carved from process-wide arena chunks that are mapped once and
-//! never unmapped. A chunk is one `PROT_NONE` reservation of
-//! `2 * CHUNK_PAGES + 1` pages; every odd page is replaced by its own
-//! `MAP_SHARED | MAP_ANONYMOUS` read-only mapping:
+//! - *flag* (2): the word is 0 while armed and 1 when interrupted. A poll is
+//!   `load; trapnz`, and the trap carries `Trap::Interrupt`. Nothing faults.
+//! - *swap* (1): the word is a pointer. Armed, it points at the cell itself
+//!   (readable). Interrupted, it points at one process-wide page that is
+//!   mapped `PROT_NONE` once and never changed. A poll loads the word and then
+//!   loads through it; that second load faults on the shared page, and the
+//!   fault at a PC whose trap code is `Interrupt` becomes `Trap::Interrupt`
+//!   (see `trap::from_runtime_box`).
+//! - *page* (0): `ix-epoch-poll` 56c25a9's codegen (one `atomic_load` from
+//!   the cell), kept only to measure the old hot path. It cannot be
+//!   interrupted.
 //!
-//! ```text
-//! | gap | poll | gap | poll | gap | ... | poll | gap |
-//! ```
+//! # Visibility
 //!
-//! Each poll page is its own VMA, and it can never merge with a neighbour:
-//! the gaps are private anonymous memory and every shared anonymous mapping
-//! has its own backing object. So `mprotect` of a poll page only rewrites the
-//! flags of one whole VMA; it never splits or merges VMAs, needs no new VMA,
-//! and doesn't change the process's map count. That is what keeps
-//! `interrupt` and `rearm` from failing with `ENOMEM` (a split needs an
-//! allocation and can hit `vm.max_map_count`). They still return `Result`,
-//! and a page whose protection change ever failed is never handed out again.
-//!
-//! When a store and every handle to its page are gone, the page is re-armed
-//! (if it was revoked) and goes back on a free list for the next store; it is
-//! never unmapped. A handle is reference counted, so `mprotect` never lands on
-//! a page that another store owns now.
+//! The interrupting thread's store is `SeqCst` (on x86 an `xchg`, which
+//! drains its store buffer; on aarch64 `stlr`). The guest's poll is a plain
+//! load with no fence. Both architectures keep caches coherent in hardware:
+//! once the store has left the writer's store buffer, the line holding the
+//! word is invalidated in every other core's cache, and the next load that
+//! executes on the guest's core misses and reads the new value. The guest
+//! needs no fence because it only has to see the store *eventually*, and
+//! "eventually" is bounded by the next poll the guest executes (a load is
+//! never satisfied from a stale copy once the invalidation has arrived)
+//! plus one coherence round trip.
 //!
 //! [`Config::poll_interruption`]: crate::Config::poll_interruption
 
 use alloc::sync::Arc;
-use alloc::vec::Vec;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use rustix::mm::{MapFlags, MprotectFlags, ProtFlags};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use rustix::mm::{MapFlags, ProtFlags};
 use std::sync::Mutex;
 
-/// Poll pages per arena chunk.
-const CHUNK_PAGES: usize = 64;
-
-/// Free poll pages (their addresses), readable and not owned by any store.
-static FREE: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-
-/// Pages that were mapped into the arena, and pages withdrawn from reuse
-/// because a protection change failed. For tests and diagnostics.
-static MAPPED: AtomicUsize = AtomicUsize::new(0);
-static QUARANTINED: AtomicUsize = AtomicUsize::new(0);
+/// The address of the process-wide never-readable page (swap variant), or 0
+/// before it is mapped. Mapped once, never unmapped, never made readable.
+static REVOKED: AtomicUsize = AtomicUsize::new(0);
+static REVOKED_INIT: Mutex<()> = Mutex::new(());
 
 fn page_size() -> usize {
     crate::runtime::vm::host_page_size()
 }
 
-/// Take a free poll page, mapping a new arena chunk when there is none.
-fn take_page() -> crate::Result<NonNull<AtomicU64>> {
-    let mut free = FREE.lock().unwrap_or_else(|e| e.into_inner());
-    if free.is_empty() {
-        grow(&mut free)?;
+/// The never-readable page, mapping it on first use.
+fn revoked_page() -> crate::Result<usize> {
+    let addr = REVOKED.load(Ordering::Acquire);
+    if addr != 0 {
+        return Ok(addr);
     }
-    let addr = free.pop().expect("grow added pages");
-    Ok(NonNull::new(addr as *mut AtomicU64).expect("arena pages are not null"))
-}
-
-/// Map one arena chunk and put its poll pages on `free`.
-fn grow(free: &mut Vec<usize>) -> crate::Result<()> {
-    let page = page_size();
-    let len = (2 * CHUNK_PAGES + 1) * page;
-    // SAFETY: a fresh anonymous reservation at an address the kernel picks.
-    // It is never unmapped: pages from it may be referenced by stores for the
-    // rest of the process.
+    let _g = REVOKED_INIT.lock().unwrap_or_else(|e| e.into_inner());
+    let addr = REVOKED.load(Ordering::Acquire);
+    if addr != 0 {
+        return Ok(addr);
+    }
+    // SAFETY: a fresh anonymous mapping at an address the kernel picks. It is
+    // never unmapped and its protection never changes, so a pointer to it
+    // stays valid (and faulting) for the rest of the process.
     let base = unsafe {
-        rustix::mm::mmap_anonymous(core::ptr::null_mut(), len, ProtFlags::empty(), MapFlags::PRIVATE)
+        rustix::mm::mmap_anonymous(
+            core::ptr::null_mut(),
+            page_size(),
+            ProtFlags::empty(),
+            MapFlags::PRIVATE,
+        )
     }
-    .map_err(|e| crate::format_err!("reserving the poll-page arena failed: {e}"))?;
-    let mut added = 0;
-    let mut err = None;
-    for i in 0..CHUNK_PAGES {
-        let addr = base as usize + (2 * i + 1) * page;
-        // SAFETY: `addr` is one page inside the reservation above, which we
-        // own and nothing else uses; MAP_FIXED replaces just that page.
-        let r = unsafe {
-            rustix::mm::mmap_anonymous(
-                addr as *mut _,
-                page,
-                ProtFlags::READ,
-                MapFlags::SHARED | MapFlags::FIXED,
-            )
-        };
-        match r {
-            Ok(p) if p as usize == addr => {
-                // Fault it in now, so the first poll in a store doesn't.
-                // SAFETY: the page is mapped readable and 8-aligned.
-                unsafe { core::ptr::read_volatile(addr as *const u64) };
-                free.push(addr);
-                added += 1;
-            }
-            Ok(_) => {
-                err = Some(crate::format_err!("MAP_FIXED poll page landed at the wrong address"));
-                break;
-            }
-            Err(e) => {
-                err = Some(crate::format_err!("mapping a poll page failed: {e}"));
-                break;
-            }
-        }
-    }
-    MAPPED.fetch_add(added, Ordering::Relaxed);
-    match (added, err) {
-        // Some pages are usable; the rest of the chunk stays PROT_NONE.
-        (1.., _) => Ok(()),
-        (0, Some(e)) => Err(e),
-        (0, None) => unreachable!("CHUNK_PAGES > 0"),
-    }
+    .map_err(|e| crate::format_err!("mapping the poll interrupt page failed: {e}"))?;
+    REVOKED.store(base as usize, Ordering::Release);
+    Ok(base as usize)
 }
 
-struct PollPage {
-    base: NonNull<AtomicU64>,
-    /// Set while the page is inaccessible. Read without the lock on the
-    /// re-arm fast path; written only under `lock`.
-    revoked: AtomicBool,
-    /// Set once a protection change of this page failed: its state is then
-    /// unknown, so it never goes back to the free list.
-    failed: AtomicBool,
-    /// Serializes `interrupt` and `rearm`, so the page's protection always
-    /// matches `revoked` once the lock is released.
-    lock: Mutex<()>,
+/// Whether `addr` lies in the process-wide never-readable page. A fault there
+/// can only come from a poll of a store that was interrupted (swap variant).
+pub(crate) fn is_revoked_page(addr: usize) -> bool {
+    let start = REVOKED.load(Ordering::Acquire);
+    start != 0 && addr >= start && addr - start < page_size()
 }
 
-// SAFETY: the page is never written through `base`; the pointer is only
-// handed to compiled code and to `mprotect`.
-unsafe impl Send for PollPage {}
-// SAFETY: as above; all state changes go through `lock`.
-unsafe impl Sync for PollPage {}
-
-impl PollPage {
-    fn protect(&self, flags: MprotectFlags) -> crate::Result<()> {
-        // SAFETY: the page is an arena page owned by this `PollPage` until it
-        // is dropped; it is a whole VMA of its own (see the module docs).
-        unsafe { rustix::mm::mprotect(self.base.as_ptr().cast(), page_size(), flags) }.map_err(|e| {
-            self.failed.store(true, Ordering::Relaxed);
-            crate::format_err!("mprotect of the poll page failed: {e}")
-        })
-    }
-}
-
-impl Drop for PollPage {
-    fn drop(&mut self) {
-        // The store and every handle are gone. Hand the page to the next
-        // store only if it is readable again; otherwise keep it out of use.
-        let ok = !self.failed.load(Ordering::Relaxed)
-            && (!self.revoked.load(Ordering::Relaxed) || self.protect(MprotectFlags::READ).is_ok());
-        if ok {
-            FREE.lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(self.base.as_ptr() as usize);
-        } else {
-            QUARANTINED.fetch_add(1, Ordering::Relaxed);
-        }
-    }
+/// One store's poll word, alone on its cache line (and the adjacent-line
+/// prefetch pair), so polls never share a line with data another core writes.
+#[repr(C, align(128))]
+struct Cell {
+    word: AtomicUsize,
+    /// The word's value while armed.
+    armed: usize,
+    /// The word's value while interrupted.
+    revoked: usize,
 }
 
 /// Interrupts the wasm running in one [`Store`](crate::Store), from any
 /// thread. Created by [`Store::interrupt_handle`](crate::Store::interrupt_handle)
 /// when [`Config::poll_interruption`](crate::Config::poll_interruption) is on.
+///
+/// The handle keeps its store's poll cell alive, so interrupting through a
+/// handle that outlived its store is harmless: no other store reads that cell.
 #[derive(Clone)]
-pub struct InterruptHandle(Arc<PollPage>);
+pub struct InterruptHandle(Arc<Cell>);
 
 impl InterruptHandle {
-    pub(crate) fn new() -> crate::Result<Self> {
-        Ok(InterruptHandle(Arc::new(PollPage {
-            base: take_page()?,
-            revoked: AtomicBool::new(false),
-            failed: AtomicBool::new(false),
-            lock: Mutex::new(()),
-        })))
-    }
-
-    /// The address compiled code polls.
-    pub(crate) fn poll_ptr(&self) -> NonNull<AtomicU64> {
-        self.0.base
-    }
-
-    /// Whether `addr` lies in this poll page.
-    pub(crate) fn contains(&self, addr: usize) -> bool {
-        let start = self.0.base.as_ptr() as usize;
-        addr >= start && addr - start < page_size()
-    }
-
-    /// Make the poll page inaccessible: the next poll in this store's wasm
-    /// traps with [`Trap::Interrupt`](crate::Trap::Interrupt). Wasm that is
-    /// not running yet traps at its first function entry. Idempotent.
-    ///
-    /// When this returns `Ok`, the kernel has changed the page tables and
-    /// flushed every CPU's TLB for the page, so no later poll on any thread
-    /// can read it.
-    ///
-    /// # Errors
-    ///
-    /// When `mprotect` fails the page stays readable and the store's wasm is
-    /// *not* interrupted. The caller may retry; the page is never reused by
-    /// another store.
-    pub fn interrupt(&self) -> crate::Result<()> {
-        let _g = self.0.lock.lock().unwrap_or_else(|e| e.into_inner());
-        if !self.0.revoked.load(Ordering::Relaxed) {
-            self.0.protect(MprotectFlags::empty())?;
-            self.0.revoked.store(true, Ordering::Release);
+    pub(crate) fn new(variant: u8) -> crate::Result<Self> {
+        let swap = variant != 2;
+        let revoked = if swap { revoked_page()? } else { 1 };
+        let mut cell = Arc::new(Cell {
+            word: AtomicUsize::new(0),
+            armed: 0,
+            revoked,
+        });
+        if swap {
+            // Armed, the word points at itself: readable, and owned by this
+            // store alone.
+            let me = Arc::get_mut(&mut cell).expect("just created");
+            me.armed = core::ptr::from_ref(&me.word) as usize;
+            *me.word.get_mut() = me.armed;
         }
-        Ok(())
+        Ok(InterruptHandle(cell))
     }
 
-    /// Make the poll page readable again, so wasm runs. Returns whether it had
-    /// been interrupted. Costs one atomic load when it was not.
-    ///
-    /// # Errors
-    ///
-    /// When `mprotect` fails the page stays revoked: every call into the
-    /// store traps with `Trap::Interrupt` at its first poll. Drop the store.
-    pub fn rearm(&self) -> crate::Result<bool> {
-        if !self.0.revoked.load(Ordering::Acquire) {
-            return Ok(false);
-        }
-        let _g = self.0.lock.lock().unwrap_or_else(|e| e.into_inner());
-        if !self.0.revoked.load(Ordering::Relaxed) {
-            return Ok(false);
-        }
-        self.0.protect(MprotectFlags::READ)?;
-        self.0.revoked.store(false, Ordering::Release);
-        Ok(true)
+    /// The address compiled code polls (the cell's word).
+    pub(crate) fn poll_ptr(&self) -> NonNull<core::sync::atomic::AtomicU64> {
+        NonNull::from(&self.0.word).cast()
     }
 
-    /// Whether [`InterruptHandle::interrupt`] took effect and
+    /// Interrupt this store's wasm: the next poll traps with
+    /// [`Trap::Interrupt`](crate::Trap::Interrupt). Wasm that is not running
+    /// yet traps at its first function entry. Idempotent, wait-free, and makes
+    /// no syscall.
+    ///
+    /// Running wasm sees the interrupt at its next poll (the next function
+    /// entry or loop iteration) once the store has reached its core's cache;
+    /// see the module docs.
+    pub fn interrupt(&self) {
+        self.0.word.store(self.0.revoked, Ordering::SeqCst);
+    }
+
+    /// Make the store's wasm runnable again. Returns whether it had been
+    /// interrupted.
+    ///
+    /// Call it on the thread that runs the store, between calls: an
+    /// interrupt that lands after a call returned stays pending until this
+    /// runs.
+    pub fn rearm(&self) -> bool {
+        self.0.word.swap(self.0.armed, Ordering::SeqCst) != self.0.armed
+    }
+
+    /// Whether [`InterruptHandle::interrupt`] ran and
     /// [`InterruptHandle::rearm`] has not run since.
     pub fn is_interrupted(&self) -> bool {
-        self.0.revoked.load(Ordering::Acquire)
-    }
-
-    /// Process-wide poll-page counts: `(mapped, free, quarantined)`. Pages are
-    /// never unmapped, so `mapped` only grows; it stays at the peak number of
-    /// live stores, rounded up to a whole arena chunk.
-    #[doc(hidden)]
-    pub fn arena_stats() -> (usize, usize, usize) {
-        let free = FREE.lock().unwrap_or_else(|e| e.into_inner()).len();
-        (MAPPED.load(Ordering::Relaxed), free, QUARANTINED.load(Ordering::Relaxed))
+        self.0.word.load(Ordering::SeqCst) != self.0.armed
     }
 }
 
 impl core::fmt::Debug for InterruptHandle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InterruptHandle")
-            .field("page", &self.0.base)
+            .field("cell", &core::ptr::from_ref(&self.0.word))
             .field("interrupted", &self.is_interrupted())
             .finish()
     }

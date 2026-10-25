@@ -304,6 +304,7 @@ impl Metadata<'_> {
             ref operator_cost,
             epoch_interruption,
             poll_interruption,
+            poll_variant,
             memory_may_move,
             guard_before_linear_memory,
             table_lazy_init,
@@ -387,6 +388,7 @@ impl Metadata<'_> {
             other.poll_interruption,
             "poll-page interruption",
         )?;
+        Self::check_int(poll_variant, other.poll_variant, "poll variant")?;
         Self::check_bool(memory_may_move, other.memory_may_move, "memory may move")?;
         Self::check_bool(
             guard_before_linear_memory,

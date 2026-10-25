@@ -7,6 +7,9 @@ use wasmtime::*;
 fn engine(f: impl FnOnce(&mut Config)) -> Engine {
     let mut c = Config::new();
     c.poll_interruption(true);
+    if let Ok(v) = std::env::var("WASMTIME_TEST_POLL_VARIANT") {
+        c.poll_variant(v.parse().unwrap());
+    }
     f(&mut c);
     Engine::new(&c).unwrap()
 }
@@ -22,7 +25,7 @@ fn interrupt_after(h: InterruptHandle, after: Duration) -> std::thread::JoinHand
     std::thread::spawn(move || {
         std::thread::sleep(after);
         let t = Instant::now();
-        h.interrupt().unwrap();
+        h.interrupt();
         t
     })
 }
@@ -87,9 +90,9 @@ fn out_of_bounds_is_still_a_memory_trap() -> Result<()> {
     assert_eq!(trap(&err), Trap::MemoryOutOfBounds);
     // And with the poll page revoked, the poll at entry wins and says so.
     let h = store.interrupt_handle().unwrap();
-    h.interrupt().unwrap();
+    h.interrupt();
     assert_eq!(trap(&run.call(&mut store, 1 << 20).unwrap_err()), Trap::Interrupt);
-    assert!(h.rearm().unwrap());
+    assert!(h.rearm());
     assert_eq!(trap(&run.call(&mut store, 1 << 20).unwrap_err()), Trap::MemoryOutOfBounds);
     Ok(())
 }
@@ -101,13 +104,13 @@ fn interrupt_before_call_traps_at_entry_and_rearm_resumes() -> Result<()> {
     let mut store = Store::new(&engine, ());
     let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), i32>(&mut store, "run")?;
     let h = store.interrupt_handle().unwrap();
-    assert!(!h.rearm().unwrap());
-    h.interrupt().unwrap();
-    h.interrupt().unwrap();
+    assert!(!h.rearm());
+    h.interrupt();
+    h.interrupt();
     assert!(h.is_interrupted());
     assert_eq!(trap(&run.call(&mut store, ()).unwrap_err()), Trap::Interrupt);
-    assert!(h.rearm().unwrap());
-    assert!(!h.rearm().unwrap());
+    assert!(h.rearm());
+    assert!(!h.rearm());
     assert_eq!(run.call(&mut store, ())?, 7);
     Ok(())
 }
@@ -149,13 +152,13 @@ fn stores_are_independent_across_threads() -> Result<()> {
     let (ha, a) = spawn(engine.clone(), module.clone());
     let (hb, b) = spawn(engine.clone(), module.clone());
     std::thread::sleep(Duration::from_millis(20));
-    ha.interrupt().unwrap();
+    ha.interrupt();
     let (ta, at) = a.join().unwrap();
     assert_eq!(ta, Trap::Interrupt);
     // B keeps running after A stopped.
     std::thread::sleep(Duration::from_millis(50));
     assert!(!b.is_finished());
-    hb.interrupt().unwrap();
+    hb.interrupt();
     let (tb, bt) = b.join().unwrap();
     assert_eq!(tb, Trap::Interrupt);
     assert!(bt > at + Duration::from_millis(40));
@@ -186,7 +189,7 @@ fn pooling_slot_reuse_polls_the_new_store() -> Result<()> {
         let mut a = Store::new(&engine, ());
         let run = Instance::new(&mut a, &module, &[])?.get_typed_func::<i32, i32>(&mut a, "run")?;
         let h = a.interrupt_handle().unwrap();
-        h.interrupt().unwrap();
+        h.interrupt();
         assert_eq!(trap(&run.call(&mut a, 10).unwrap_err()), Trap::Interrupt);
         h
     };
@@ -196,9 +199,9 @@ fn pooling_slot_reuse_polls_the_new_store() -> Result<()> {
     assert!(old.is_interrupted());
     assert_eq!(run.call(&mut b, 1000)?, 1000);
     // Interrupting the dead store's handle does nothing to B.
-    old.interrupt().unwrap();
+    old.interrupt();
     assert_eq!(run.call(&mut b, 1000)?, 1000);
-    b.interrupt_handle().unwrap().interrupt().unwrap();
+    b.interrupt_handle().unwrap().interrupt();
     assert_eq!(trap(&run.call(&mut b, 1000).unwrap_err()), Trap::Interrupt);
     Ok(())
 }
@@ -240,28 +243,47 @@ fn only_x86_64_and_aarch64_targets() -> Result<()> {
 }
 
 #[test]
-fn pages_are_reused_not_remapped() -> Result<()> {
+fn many_interrupts_and_rearms() -> Result<()> {
+    // Interrupt and re-arm one store over and over, and run many short-lived
+    // stores: every interrupt stops exactly the next call, every re-arm lets
+    // the following call run, and nothing leaks or changes state for others.
+    let engine = engine(|_| {});
+    let spin = Module::new(&engine, SPIN)?;
+    let seven = Module::new(&engine, r#"(module (func (export "run") (result i32) i32.const 7))"#)?;
+    let mut store = Store::new(&engine, ());
+    let run = Instance::new(&mut store, &seven, &[])?.get_typed_func::<(), i32>(&mut store, "run")?;
+    let h = store.interrupt_handle().unwrap();
+    for _ in 0..10_000 {
+        h.interrupt();
+        assert_eq!(trap(&run.call(&mut store, ()).unwrap_err()), Trap::Interrupt);
+        assert!(h.rearm());
+        assert_eq!(run.call(&mut store, ())?, 7);
+    }
+    for _ in 0..2000 {
+        let mut s = Store::new(&engine, ());
+        let run = Instance::new(&mut s, &spin, &[])?.get_typed_func::<(), ()>(&mut s, "run")?;
+        s.interrupt_handle().unwrap().interrupt();
+        assert_eq!(trap(&run.call(&mut s, ()).unwrap_err()), Trap::Interrupt);
+    }
+    Ok(())
+}
+
+#[test]
+fn interrupt_is_seen_by_a_running_loop_quickly() -> Result<()> {
+    // The interrupt is one store on another thread; the spinning guest has
+    // no fence. Measure from the store to the trap, many times.
     let engine = engine(|_| {});
     let module = Module::new(&engine, SPIN)?;
-    let (mapped0, _, quarantined0) = InterruptHandle::arena_stats();
-    // Interrupted and then dropped, store after store: each page is re-armed
-    // and goes back on the free list instead of being unmapped.
-    for _ in 0..5000 {
+    let mut worst = Duration::ZERO;
+    for _ in 0..200 {
         let mut store = Store::new(&engine, ());
         let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), ()>(&mut store, "run")?;
-        let h = store.interrupt_handle().unwrap();
-        h.interrupt()?;
+        let t = interrupt_after(store.interrupt_handle().unwrap(), Duration::from_micros(200));
         assert_eq!(trap(&run.call(&mut store, ()).unwrap_err()), Trap::Interrupt);
+        worst = worst.max(t.join().unwrap().elapsed());
     }
-    let (mapped1, _, quarantined1) = InterruptHandle::arena_stats();
-    // Other tests in this process map pages too, but nothing like 5000.
-    assert!(mapped1 - mapped0 < 1000, "arena grew from {mapped0} to {mapped1} pages");
-    assert_eq!(quarantined1, quarantined0);
-    // A store that gets a recycled page runs normally.
-    let mut store = Store::new(&engine, ());
-    let module = Module::new(&engine, r#"(module (func (export "run") (result i32) i32.const 7))"#)?;
-    let run = Instance::new(&mut store, &module, &[])?.get_typed_func::<(), i32>(&mut store, "run")?;
-    assert_eq!(run.call(&mut store, ())?, 7);
+    // Includes thread wake-up and unwinding; a missed store would hang.
+    assert!(worst < Duration::from_millis(50), "worst {worst:?}");
     Ok(())
 }
 

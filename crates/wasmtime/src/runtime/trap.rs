@@ -83,7 +83,7 @@ fn poll_fault_mismatch(pc: usize, addr: Option<usize>, interrupt: bool, on_poll_
         feature = "std" => {
             eprintln!(
                 "Wasmtime caught a fault at pc {pc:#x}, address {addr:#x}: poll site = \
-                 {interrupt}, on the store's poll page = {on_poll_page}. A poll-page \
+                 {interrupt}, this store's interrupt fault = {on_poll_page}. A poll \
                  fault must be both; this is a bug in Wasmtime."
             );
             std::process::abort();
@@ -142,16 +142,20 @@ pub(crate) fn from_runtime_box(
             // and additionally translate it to a wasm-local address to be added
             // as context to the error.
             //
-            // Poll-page interruption (ix fork): a fault on the store's poll
-            // page must come from a poll site, whose trap code is
-            // `Interrupt`, and a fault at a poll site must be on the poll
-            // page. Anything else means compiled code and the runtime
-            // disagree, so abort rather than guess which one it was.
+            // Poll interruption (ix fork): a memory fault on the shared
+            // revoked page must come from a poll site (trap code
+            // `Interrupt`) of a store whose polls load through their cell,
+            // and a memory fault at a poll site must be on that page. An
+            // interrupt raised by a trap instruction (the flag variant) has
+            // no faulting address and is not checked here. Anything else
+            // means compiled code and the runtime disagree, so abort rather
+            // than guess which one it was.
             let interrupt = matches!(trap, CompiledTrap::Normal(Trap::Interrupt));
-            let on_poll_page = faulting_addr.is_some_and(|addr| store.poll_page_contains(addr));
-            if on_poll_page || (interrupt && faulting_addr.is_some()) {
-                if !(on_poll_page && interrupt) {
-                    poll_fault_mismatch(pc, faulting_addr, interrupt, on_poll_page);
+            let on_revoked = faulting_addr.is_some_and(StoreOpaque::addr_on_revoked_page);
+            if on_revoked || (interrupt && faulting_addr.is_some()) {
+                let ours = faulting_addr.is_some_and(|addr| store.poll_fault_is_interrupt(addr));
+                if !(ours && interrupt) {
+                    poll_fault_mismatch(pc, faulting_addr, interrupt, ours);
                 }
             } else if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
                 err = err.context(fault);

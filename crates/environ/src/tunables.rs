@@ -214,6 +214,12 @@ define_tunables! {
         /// interrupts by making that page inaccessible (ix fork). Kept last
         /// so the fork's fields stay after upstream's.
         pub poll_interruption: bool,
+
+        /// A/B only (ix fork): how a poll is compiled. 0 = one atomic load
+        /// from the page (`ix-epoch-poll` 56c25a9), 1 = pointer swap (a
+        /// volatile load of the cell, then a load through it), 2 = flag word
+        /// (a volatile load of the cell and a branch to an interrupt trap).
+        pub poll_variant: u8,
     }
 
     pub struct ConfigTunables {
@@ -304,6 +310,7 @@ impl Tunables {
             branch_hinting: false,
             debug_symbols: true,
             poll_interruption: false,
+            poll_variant: 2,
         }
     }
 

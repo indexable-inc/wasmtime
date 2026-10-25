@@ -862,13 +862,30 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     /// poll stays, and it can't be dead-code eliminated or hoisted. On x86
     /// it lowers to a plain `mov`.
     fn poll_check(&mut self, builder: &mut FunctionBuilder<'_>) {
-        let addr = builder.use_var(self.poll_ptr_var);
+        let cell = builder.use_var(self.poll_ptr_var);
         let region = self.alias_regions.vmctx().poll_word().region(builder.func);
-        let flags = MemFlagsData::new()
+        let base = MemFlagsData::new()
             .with_aligned()
-            .with_alias_region(Some(region))
-            .with_trap_code(Some(TRAP_INTERRUPT));
-        builder.ins().atomic_load(I64, flags, addr);
+            .with_alias_region(Some(region));
+        match self.tunables.poll_variant {
+            0 => {
+                let flags = base.with_trap_code(Some(TRAP_INTERRUPT));
+                builder.ins().atomic_load(I64, flags, cell);
+            }
+            1 => {
+                let word = builder
+                    .ins()
+                    .load(I64, base.with_notrap().with_volatile(), cell, 0);
+                let flags = base.with_trap_code(Some(TRAP_INTERRUPT));
+                builder.ins().load(I64, flags, word, 0);
+            }
+            _ => {
+                let word = builder
+                    .ins()
+                    .load(I64, base.with_notrap().with_volatile(), cell, 0);
+                self.trapnz(builder, word, TRAP_INTERRUPT);
+            }
+        }
     }
 
     fn hook_malloc_exit(&mut self, builder: &mut FunctionBuilder, retvals: &[ir::Value]) {

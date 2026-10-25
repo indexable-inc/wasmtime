@@ -824,6 +824,13 @@ impl Config {
         self
     }
 
+    /// A/B only (ix fork): how polls are compiled; see `Tunables::poll_variant`.
+    #[doc(hidden)]
+    pub fn poll_variant(&mut self, variant: u8) -> &mut Self {
+        self.tunables.poll_variant = Some(variant);
+        self
+    }
+
     /// XXX: For internal fuzzing and debugging use only!
     #[doc(hidden)]
     pub fn gc_zeal_alloc_counter(&mut self, counter: Option<NonZeroU32>) -> Result<&mut Self> {

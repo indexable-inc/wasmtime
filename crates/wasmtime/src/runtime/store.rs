@@ -463,8 +463,8 @@ pub struct StoreOpaque {
     engine: Engine,
     vm_store_context: VMStoreContext,
 
-    /// The poll page compiled code reads under poll-page interruption (ix
-    /// fork); `None` when `Config::poll_interruption` is off.
+    /// The poll cell compiled code reads under poll interruption (ix fork);
+    /// `None` when `Config::poll_interruption` is off.
     #[cfg(all(unix, feature = "std"))]
     poll_page: Option<crate::InterruptHandle>,
 
@@ -735,7 +735,7 @@ impl<T> Store<T> {
             vm_store_context: Default::default(),
             #[cfg(all(unix, feature = "std"))]
             poll_page: if engine.tunables().poll_interruption {
-                Some(crate::InterruptHandle::new()?)
+                Some(crate::InterruptHandle::new(engine.tunables().poll_variant)?)
             } else {
                 None
             },
@@ -1553,14 +1553,27 @@ impl StoreOpaque {
         None
     }
 
-    /// Whether `addr` is in this store's poll page.
-    pub(crate) fn poll_page_contains(&self, addr: usize) -> bool {
+    /// Whether a fault at `addr` is this store's poll faulting on the shared
+    /// revoked page: only possible when the store's polls load through their
+    /// cell (the swap variant).
+    pub(crate) fn poll_fault_is_interrupt(&self, addr: usize) -> bool {
         #[cfg(all(unix, feature = "std"))]
-        if let Some(p) = &self.poll_page {
-            return p.contains(addr);
+        if self.poll_page.is_some() && self.engine.tunables().poll_variant == 1 {
+            return crate::runtime::poll_interrupt::is_revoked_page(addr);
         }
         let _ = addr;
         false
+    }
+
+    /// Whether `addr` is in the shared revoked page at all (any store).
+    pub(crate) fn addr_on_revoked_page(addr: usize) -> bool {
+        #[cfg(all(unix, feature = "std"))]
+        return crate::runtime::poll_interrupt::is_revoked_page(addr);
+        #[cfg(not(all(unix, feature = "std")))]
+        {
+            let _ = addr;
+            false
+        }
     }
 
     /// The handle that interrupts this store's wasm, when
