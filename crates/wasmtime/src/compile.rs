@@ -867,18 +867,6 @@ the use case.
         );
         debug_assert_ne!(caller_key, callee_key, "we never inline recursion");
 
-        // Put a limit on how large we can make a function via inlining to cap
-        // code bloat.
-        let sum_size = caller_size.saturating_add(callee_size);
-        if sum_size > tunables.inlining_sum_size_threshold {
-            log::trace!(
-                "  --> not inlining: the sum of the caller's and callee's sizes is greater than \
-                 the inlining-sum-size threshold: {callee_size} + {caller_size} > {}",
-                tunables.inlining_sum_size_threshold
-            );
-            return false;
-        }
-
         // Skip inlining into array-abi functions which are entry
         // trampolines into wasm. ABI-wise it's required that these have a
         // single `try_call` into the module and it doesn't work if multiple
@@ -927,15 +915,47 @@ the use case.
             _ => {}
         }
 
-        // Small callees are often worth inlining regardless of the size of the
-        // caller.
+        // Put a limit on how large we can make a function via inlining to cap
+        // code bloat. Small callees get their own, usually larger, cap: they
+        // are leaf helpers whose call overhead (frame setup, argument moves,
+        // clobbered registers, and spills of everything live across the call)
+        // costs more than their body, and inlining them grows the caller only
+        // a little.
+        let sum_size = caller_size.saturating_add(callee_size);
         if callee_size <= tunables.inlining_small_callee_size {
+            if sum_size > tunables.inlining_small_sum_size_threshold {
+                log::trace!(
+                    "  --> not inlining: small callee, but the sum of the caller's and callee's \
+                     sizes is greater than the small-callee sum-size threshold: \
+                     {callee_size} + {caller_size} > {}",
+                    tunables.inlining_small_sum_size_threshold
+                );
+                return false;
+            }
             log::trace!(
                 "  --> inlining: callee's size is less than the small-callee size: \
                  {callee_size} <= {}",
                 tunables.inlining_small_callee_size
             );
             return true;
+        }
+
+        if callee_size > tunables.inlining_max_callee_size {
+            log::trace!(
+                "  --> not inlining: callee's size is greater than the max callee size: \
+                 {callee_size} > {}",
+                tunables.inlining_max_callee_size
+            );
+            return false;
+        }
+
+        if sum_size > tunables.inlining_sum_size_threshold {
+            log::trace!(
+                "  --> not inlining: the sum of the caller's and callee's sizes is greater than \
+                 the inlining-sum-size threshold: {callee_size} + {caller_size} > {}",
+                tunables.inlining_sum_size_threshold
+            );
+            return false;
         }
 
         log::trace!("  --> inlining: did not find a reason we should not");

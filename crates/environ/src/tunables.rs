@@ -154,6 +154,16 @@ define_tunables! {
         /// sizes, past which we will generally not inline calls anymore.
         pub inlining_sum_size_threshold: u32,
 
+        /// The cap on the sum of the caller's and a small callee's sizes. Small
+        /// callees (see `inlining_small_callee_size`) are inlined while the
+        /// caller stays under this size, which may be larger than
+        /// `inlining_sum_size_threshold` so that leaf helpers still inline
+        /// into large functions.
+        pub inlining_small_sum_size_threshold: u32,
+
+        /// Callees larger than this are never inlined.
+        pub inlining_max_callee_size: u32,
+
         /// Whether any component model feature related to concurrency is
         /// enabled.
         pub concurrency_support: bool,
@@ -332,6 +342,8 @@ impl Tunables {
             inlining: Inlining::No,
             inlining_small_callee_size: 50,
             inlining_sum_size_threshold: 2000,
+            inlining_small_sum_size_threshold: 2000,
+            inlining_max_callee_size: u32::MAX,
             debug_guest: false,
             concurrency_support: true,
             recording: false,
