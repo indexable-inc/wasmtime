@@ -51,13 +51,14 @@ impl<'a, F: Function> Env<'a, F> {
                 trace!("trying bundle {:?} to preg {:?}", bundle, preg);
                 let preg_idx = PRegIndex::new(preg.index());
                 // Only `Allocated` matters here, so stop at the first
-                // conflict that has any weight (`Some(0)`) instead of
-                // collecting every conflicting bundle. The full scan made
-                // this loop O(spilled bundles x conflicts per preg): with
-                // tens of thousands of values live across a call it was
-                // quadratic (49k loop-carried locals: 47 s).
+                // conflict instead of collecting every conflicting bundle.
+                // The full scan made this loop O(spilled bundles x
+                // conflicts per preg): with tens of thousands of values
+                // live across a call it was quadratic (49k loop-carried
+                // locals: 47 s). `Some(0)` as the cost limit would miss
+                // conflicts with zero-weight bundles, so this asks for any.
                 if let AllocRegResult::Allocated(_) =
-                    self.try_to_allocate_bundle_to_reg(bundle, preg_idx, Some(0), &mut scratch)
+                    self.try_to_allocate_bundle_to_reg::<true>(bundle, preg_idx, None, &mut scratch)
                 {
                     self.ctx.output.stats.spill_bundle_reg_success += 1;
                     success = true;

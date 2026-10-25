@@ -52,7 +52,12 @@ impl<'a, F: Function> Env<'a, F> {
         Ok(())
     }
 
-    pub fn try_to_allocate_bundle_to_reg<'b>(
+    /// With `STOP_AT_ANY_CONFLICT`, return `AllocRegResult::ConflictHighCost`
+    /// at the first conflict with another bundle, whatever its weight, for a
+    /// caller that only acts on `Allocated` (ix fork). It is a const
+    /// parameter so the main allocation loop's copy stays as it was: a
+    /// runtime flag here cost 8% of Turso's compile time.
+    pub fn try_to_allocate_bundle_to_reg<'b, const STOP_AT_ANY_CONFLICT: bool>(
         &mut self,
         bundle: LiveBundleIndex,
         reg: PRegIndex,
@@ -166,6 +171,9 @@ impl<'a, F: Function> Env<'a, F> {
                         // conflicts list.
                         let conflict_bundle = self.ctx.ranges[*preg_range].bundle;
                         trace!("   -> conflict bundle {:?}", conflict_bundle);
+                        if STOP_AT_ANY_CONFLICT {
+                            break 'scan Some(AllocRegResult::ConflictHighCost);
+                        }
                         if self.ctx.conflict_set.insert(conflict_bundle) {
                             conflicts.push(conflict_bundle);
                             max_conflict_weight = core::cmp::max(
@@ -1115,7 +1123,7 @@ impl<'a, F: Function> Env<'a, F> {
                     (Some(a), Some(b)) => Some(core::cmp::max(a, b)),
                     _ => None,
                 };
-                match self.try_to_allocate_bundle_to_reg(
+                match self.try_to_allocate_bundle_to_reg::<false>(
                     bundle,
                     preg_idx,
                     scan_limit_cost,
