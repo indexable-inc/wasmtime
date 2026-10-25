@@ -29,54 +29,52 @@
 ;;       movq    0x18(%r10), %r10
 ;;       addq    $0x50, %r10
 ;;       cmpq    %rsp, %r10
-;;       ja      0x11a
+;;       ja      0x111
 ;;   19: subq    $0x40, %rsp
 ;;       movq    %rbx, 0x10(%rsp)
 ;;       movq    %r12, 0x18(%rsp)
 ;;       movq    %r13, 0x20(%rsp)
 ;;       movq    %r14, 0x28(%rsp)
 ;;       movq    %r15, 0x30(%rsp)
-;;       movq    0x28(%rdi), %rsi
-;;       movl    (%rsi), %eax
-;;       movl    %eax, %ecx
-;;       leaq    0x20(%rcx), %rdx
-;;       movl    4(%rsi), %r8d
-;;       cmpq    %r8, %rdx
-;;       ja      0xe6
-;;   4f: movq    %rdi, 8(%rsp)
-;;       leal    0x20(%rax), %edi
-;;       movl    %edi, (%rsi)
-;;       movq    8(%rsp), %r9
-;;       movq    8(%r9), %rsi
-;;       movq    0x20(%rsi), %rdi
-;;       leaq    (%rdi, %rcx), %rsi
-;;       movl    $0xb0000002, (%rdi, %rcx)
+;;       movq    0x28(%rdi), %rcx
+;;       movl    (%rcx), %eax
+;;       movl    4(%rcx), %edx
+;;       leaq    0x20(%rax), %rsi
+;;       cmpq    %rdx, %rsi
+;;       ja      0xdd
+;;   4c: movq    %rdi, 8(%rsp)
+;;       leal    0x20(%rax), %esi
+;;       movl    %esi, (%rcx)
+;;       movq    8(%rsp), %r8
+;;       movq    8(%r8), %rcx
+;;       movq    0x20(%rcx), %rsi
+;;       leaq    (%rsi, %rax), %rcx
+;;       movl    $0xb0000002, (%rsi, %rax)
 ;;       ╰─╼ trap: GcHeapCorrupt
-;;       movq    0x30(%r9), %r8
-;;       movl    (%r8), %r8d
-;;       movl    %r8d, 4(%rdi, %rcx)
+;;       movq    0x30(%r8), %rdi
+;;       movl    (%rdi), %edi
+;;       movl    %edi, 4(%rsi, %rax)
 ;;       ╰─╼ trap: GcHeapCorrupt
-;;       movl    $0x20, %r8d
-;;       movl    %r8d, 8(%rdi, %rcx)
+;;       movl    $0x20, %edi
+;;       movl    %edi, 8(%rsi, %rax)
 ;;       ╰─╼ trap: GcHeapCorrupt
 ;;       movl    %eax, (%rsp)
-;;       movl    $0x2a, 0x10(%rsi)
+;;       movl    $0x2a, 0x10(%rcx)
 ;;       ╰─╼ trap: GcHeapCorrupt
-;;       movq    8(%rsp), %r9
-;;       movq    0x48(%r9), %rax
-;;       movq    0x58(%r9), %rdi
+;;       movq    8(%rsp), %r8
+;;       movq    0x48(%r8), %rax
+;;       movq    0x58(%r8), %rdi
 ;;       movq    8(%rsp), %rsi
 ;;       callq   *%rax
 ;;       ├─╼ exception frame offset: SP = FP - 0x40
-;;       ╰─╼ exception handler: default handler, context at [SP+0x8], handler=0xa6
+;;       ╰─╼ exception handler: default handler, context at [SP+0x8], handler=0x9f
 ;;       movl    (%rsp), %eax
 ;;       ╰─╼ stack_map: frame_size=64, frame_offsets=[0]
 ;;       testl   %eax, %eax
-;;       je      0x11c
-;;   b1: movq    8(%rsp), %r9
-;;       movq    8(%r9), %rcx
+;;       je      0x113
+;;   aa: movq    8(%rsp), %r8
+;;       movq    8(%r8), %rcx
 ;;       movq    0x20(%rcx), %rcx
-;;       movl    %eax, %eax
 ;;       movl    0x10(%rcx, %rax), %eax
 ;;       ╰─╼ trap: GcHeapCorrupt
 ;;       movq    0x10(%rsp), %rbx
@@ -88,19 +86,19 @@
 ;;       movq    %rbp, %rsp
 ;;       popq    %rbp
 ;;       retq
-;;   e6: movl    $0xb0000002, %esi
-;;   eb: movq    0x30(%rdi), %rax
-;;   ef: movq    %rdi, 8(%rsp)
-;;   f4: movl    (%rax), %edx
-;;   f6: movl    $0x20, %ecx
-;;   fb: movl    $0x10, %r8d
-;;  101: callq   0x291
-;;  106: movq    8(%rsp), %r9
-;;  10b: movq    8(%r9), %rcx
-;;  10f: movl    %eax, %esi
-;;  111: addq    0x20(%rcx), %rsi
-;;  115: jmp     0x88
-;;  11a: ud2
+;;   dd: movl    $0xb0000002, %esi
+;;   e2: movq    0x30(%rdi), %rax
+;;   e6: movq    %rdi, 8(%rsp)
+;;   eb: movl    (%rax), %edx
+;;   ed: movl    $0x20, %ecx
+;;   f2: movl    $0x10, %r8d
+;;   f8: callq   0x288
+;;   fd: movq    8(%rsp), %r8
+;;  102: movq    8(%r8), %rsi
+;;  106: movl    %eax, %ecx
+;;  108: addq    0x20(%rsi), %rcx
+;;  10c: jmp     0x81
+;;  111: ud2
 ;;       ╰─╼ trap: Normal(StackOverflow)
-;;  11c: ud2
+;;  113: ud2
 ;;       ╰─╼ trap: Normal(NullReference)
