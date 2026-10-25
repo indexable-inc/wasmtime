@@ -173,6 +173,10 @@ struct ModuleInner {
 
     /// The checksum of the source binary from which this module was compiled.
     checksum: WasmChecksum,
+
+    /// ix fork: the read-only `call_indirect` dispatch array, shared by all
+    /// instances (see `wasmtime_environ::IxDispatchPlan`).
+    ix_dispatch: Option<MmapVec>,
 }
 
 impl fmt::Debug for Module {
@@ -192,6 +196,22 @@ impl fmt::Debug for ModuleInner {
 }
 
 impl Module {
+    /// ix fork: the module's read-only `call_indirect` dispatch array, or
+    /// null when it has none.
+    pub(crate) fn ix_dispatch_ptr(&self) -> *const usize {
+        match &self.inner.ix_dispatch {
+            Some(m) => m.as_ptr().cast(),
+            None => core::ptr::null(),
+        }
+    }
+
+    /// ix fork, for tests and benches: the number of `call_indirect`
+    /// dispatch rows this module has (`Config::ix_static_call_indirect`).
+    #[doc(hidden)]
+    pub fn ix_dispatch_rows(&self) -> usize {
+        self.inner.module.module().ix_dispatch.rows.len()
+    }
+
     /// Creates a new WebAssembly `Module` from the given in-memory `bytes`.
     ///
     /// The `bytes` provided must be in one of the following formats:
@@ -560,6 +580,7 @@ impl Module {
             .validate_module(module.module(), &offsets)?;
 
         let _ = serializable;
+        let ix_dispatch = ix_build_dispatch(engine, &code, &module)?;
 
         Ok(Self {
             inner: try_new::<Arc<_>>(ModuleInner {
@@ -571,6 +592,7 @@ impl Module {
                 serializable,
                 offsets,
                 checksum,
+                ix_dispatch,
             })?,
         })
     }
@@ -1333,4 +1355,83 @@ mod tests {
         // Length may be strictly greater if it becomes page-aligned.
         assert!(len >= bytes.len());
     }
+}
+
+/// ix fork: fill the module's `call_indirect` dispatch array from its plan
+/// (`wasmtime_environ::IxDispatchPlan`), once per module, then make it
+/// read-only. Entry `row.start + i` is the wasm-ABI entry of element `i`'s
+/// function when that function's engine-canonical type is the row's
+/// (final) type, else 0; each row's last entry stays 0.
+fn ix_build_dispatch(
+    engine: &Engine,
+    code: &EngineCode,
+    module: &CompiledModule,
+) -> Result<Option<MmapVec>> {
+    use wasmtime_environ::DefinedFuncIndex;
+    let env = module.module();
+    let plan = &env.ix_dispatch;
+    if plan.entries == 0 {
+        return Ok(None);
+    }
+    // The entries are absolute pointers into the code every store shares;
+    // per-store private copies (guest debugging) would not match them.
+    ensure!(
+        !engine.tunables().debug_guest,
+        "ix call_indirect dispatch needs guest debugging off"
+    );
+    let text = code.ix_shared_text_base();
+    let mut entries = vec![0usize; usize::try_from(plan.entries)?];
+    for row in plan.rows.iter() {
+        let want = code
+            .signatures()
+            .shared_type(row.ty)
+            .context("ix dispatch row type not registered")?;
+        let image = plan
+            .images
+            .get(usize::try_from(row.image)?)
+            .context("ix dispatch row image out of range")?;
+        let start = usize::try_from(row.start)?;
+        let dst = entries
+            .get_mut(start..start + image.len() + 1)
+            .context("ix dispatch row out of range")?;
+        for (slot, &d) in dst.iter_mut().zip(image.iter()) {
+            if d == u32::MAX {
+                continue;
+            }
+            let def = DefinedFuncIndex::from_u32(d);
+            let f = env.func_index(def);
+            let have = env
+                .functions
+                .get(f)
+                .context("ix dispatch element out of range")?
+                .signature
+                .unwrap_engine_type_index();
+            if have != want {
+                continue;
+            }
+            let range = module.function_range(FuncKey::DefinedWasmFunction(env.module_index, def));
+            *slot = text + range.start;
+        }
+    }
+    // SAFETY: `usize` has no padding or invalid bit patterns.
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            entries.as_ptr().cast::<u8>(),
+            entries.len() * core::mem::size_of::<usize>(),
+        )
+    };
+    let mmap = MmapVec::from_slice_with_alignment(bytes, core::mem::align_of::<usize>())?;
+    #[cfg(has_virtual_memory)]
+    if mmap.supports_virtual_memory() {
+        // SAFETY: nothing else refers to this fresh mapping yet.
+        unsafe { mmap.make_readonly(0..mmap.len())? };
+    }
+    log::debug!(
+        target: "ix_check_trim",
+        "ix dispatch array: {} rows, {} entries, {} bytes",
+        plan.rows.len(),
+        plan.entries,
+        mmap.len()
+    );
+    Ok(Some(mmap))
 }

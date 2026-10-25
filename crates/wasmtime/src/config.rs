@@ -995,6 +995,46 @@ impl Config {
         self
     }
 
+    /// ix fork: lower `call_indirect` through a static table to one load from
+    /// a read-only dispatch array and a call.
+    ///
+    /// Static means what [`Config::ix_table_devirt`] means, read only from the
+    /// module's own bytes, plus: the table is 32-bit indexed and every
+    /// non-null element is a function the module defines. For each final call
+    /// type `T` used through such a table, the module gets one row of code
+    /// pointers over the table, built once when the module is loaded, made
+    /// read-only, and shared by every instance: a slot whose function has
+    /// exactly type `T` holds its code, every other slot (another type, or
+    /// null) holds 0, and one extra slot past the end takes an out-of-bounds
+    /// index (the index is clamped to it with a Spectre-safe conditional
+    /// move). The call loads the slot and calls it with the caller's own
+    /// vmctx; a 0 slot branches to the ordinary checked lowering, which
+    /// traps with the usual code. Every other table keeps every check.
+    ///
+    /// Has no effect with guest debugging on. Part of the artifact
+    /// compatibility check. By default this is off.
+    pub fn ix_static_call_indirect(&mut self, enable: bool) -> &mut Self {
+        self.tunables.ix_static_call_indirect = Some(enable);
+        self
+    }
+
+    /// ix fork, UNSAFE, bench only: compile every `call_indirect` without its
+    /// checks, to measure what they cost. `level` 1 drops the bounds check,
+    /// the Spectre mask, the null check and the signature check; 2 also
+    /// passes the caller's vmctx to the callee. This breaks the sandbox for
+    /// any module that calls out of bounds, through a null or mismatched
+    /// slot, or (level 2) through an imported function. Never use it for code
+    /// you did not write.
+    ///
+    /// # Safety
+    ///
+    /// Only for modules known to make only well-typed in-bounds indirect
+    /// calls (and, at level 2, only to functions they define).
+    pub unsafe fn ix_unsafe_ci_nocheck(&mut self, level: u32) -> &mut Self {
+        self.tunables.ix_unsafe_ci_nocheck = Some(level);
+        self
+    }
+
     /// Configures the size of the stacks used for asynchronous execution.
     ///
     /// This setting configures the size of the stacks that are allocated for

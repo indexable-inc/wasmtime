@@ -31,6 +31,7 @@ mod gc;
 mod hostcall;
 #[macro_use]
 mod ix_abi;
+mod ix_dispatch;
 mod ix_intrinsics;
 mod key;
 mod module;
@@ -62,6 +63,7 @@ pub use crate::frame_table::*;
 pub use crate::gc::*;
 pub use crate::hostcall::*;
 pub use crate::ix_abi::{IX_ABI_HASH, IX_ABI_TAG, IX_FEATURES};
+pub use crate::ix_dispatch::*;
 pub use crate::ix_intrinsics::*;
 pub use crate::key::*;
 pub use crate::module::*;

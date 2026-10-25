@@ -372,6 +372,8 @@ impl Metadata<'_> {
             asan_stack_switching,
             ix_leaf_stack_slack,
             ix_table_devirt,
+            ix_unsafe_ci_nocheck,
+            ix_static_call_indirect,
 
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
@@ -457,6 +459,16 @@ impl Metadata<'_> {
             "ix leaf stack slack",
         )?;
         Self::check_bool(ix_table_devirt, other.ix_table_devirt, "ix table devirt")?;
+        Self::check_int(
+            ix_unsafe_ci_nocheck,
+            other.ix_unsafe_ci_nocheck,
+            "ix unsafe call_indirect nocheck",
+        )?;
+        Self::check_bool(
+            ix_static_call_indirect,
+            other.ix_static_call_indirect,
+            "ix static call_indirect",
+        )?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,

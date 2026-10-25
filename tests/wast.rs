@@ -130,6 +130,12 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
         cfg.table_lazy_init(false);
     }
 
+    // ix fork: run the whole suite with the static `call_indirect` dispatch
+    // on (`WASMTIME_TEST_IX_INDIRECT=1`).
+    if is_cranelift && std::env::var("WASMTIME_TEST_IX_INDIRECT").is_ok() {
+        cfg.ix_static_call_indirect(true);
+    }
+
     // By default we'll allocate huge chunks (6gb) of the address space for each
     // linear memory. This is typically fine but when we emulate tests with QEMU
     // it turns out that it causes memory usage to balloon massively. Leave a

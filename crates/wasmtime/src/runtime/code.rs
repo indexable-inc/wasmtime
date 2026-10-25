@@ -182,6 +182,17 @@ impl EngineCode {
     // patch trampolines in StoreCode, so we can freely mix in
     // EngineCode variants.
 
+    /// ix fork: the start of the text section every store executes when
+    /// stores share this code, for the `call_indirect` dispatch array
+    /// (`wasmtime_environ::IxDispatchPlan`). Only valid when guest debugging
+    /// is off: `StoreCode::new` then shares `original_code` with every
+    /// store instead of making a private copy, and the dispatch plan is
+    /// only ever made with guest debugging off (and the engine's tunables
+    /// must match the artifact's).
+    pub(crate) fn ix_shared_text_base(&self) -> usize {
+        self.original_code.text().as_ptr().addr()
+    }
+
     /// Get the Wasm-to-array trampoline for the given raw range in
     /// the text segment.
     pub(crate) fn raw_wasm_to_array_trampoline_data(&self, range: Range<usize>) -> &[u8] {

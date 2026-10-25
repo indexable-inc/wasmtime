@@ -176,6 +176,11 @@ macro_rules! for_each_vmctx_type {
                         )]
                         type_ids: VmPtr<VMSharedTypeIndex>
                     }
+
+                    // ix fork: the module's read-only `call_indirect`
+                    // dispatch array (`wasmtime_environ::IxDispatchPlan`),
+                    // or null when it has none.
+                    field { #[readonly] #[can_move] ix_dispatch: VmPtr<usize> }
                 }
 
                 // Variable-width fields come after the fixed-width fields
