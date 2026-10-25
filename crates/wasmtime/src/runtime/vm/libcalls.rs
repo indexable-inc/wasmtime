@@ -423,15 +423,18 @@ const BULK_CHUNKED_MIN: usize = 2 << 20;
 /// 30-100 us between preemption checks.
 const BULK_CHUNK: usize = 1 << 20;
 /// ix fork: the chunk for a copy whose ranges do not overlap, on x86_64
-/// (64 MiB, about 2 ms at the ~30 GB/s measured on EPYC 9R45). glibc's
-/// x86 memmove switches to non-temporal stores at
-/// `x86_non_temporal_threshold` (24 MiB on that host, derived from the L3
+/// (32 MiB). glibc's x86 memmove switches to non-temporal stores at
+/// `x86_non_temporal_threshold` (24 MiB on EPYC 9R45, derived from the L3
 /// size), and only for non-overlapping ranges. 1 MiB chunks stayed under it
-/// and made far copies of 32 MiB or more 14-41% slower; 64 MiB chunks keep
-/// the non-temporal path wherever the threshold is at most 64 MiB. Fills
-/// measured neutral at 1 MiB, and overlapping copies never take that path.
+/// and made far copies of 32 MiB or more 14-41% slower; 32 MiB chunks keep
+/// the non-temporal path wherever the threshold is at most 32 MiB (measured
+/// equal to one whole memmove at 256 MiB and 1 GiB). One chunk takes about
+/// 1 ms on resident pages and about 7 ms when every destination page
+/// faults in fresh; 64 MiB took 14-18 ms there, past the 10 ms preemption
+/// target. Fills measured neutral at 1 MiB, and overlapping copies never
+/// take the non-temporal path.
 const BULK_COPY_FAR_CHUNK: usize = if cfg!(target_arch = "x86_64") {
-    64 << 20
+    32 << 20
 } else {
     BULK_CHUNK
 };

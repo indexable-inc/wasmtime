@@ -193,7 +193,7 @@ fn copy_3gib_backward_epoch_winch() {
     check_prompt(Mode::EpochWinch, "copy", GIB, 0, 3 * GIB);
 }
 
-// Non-overlapping: the 64 MiB far-copy chunks on x86_64.
+// Non-overlapping: the 32 MiB far-copy chunks on x86_64.
 #[test]
 fn copy_2gib_far_poll() {
     check_prompt(Mode::Poll, "copy", 0, 2 * GIB, 2 * GIB);
@@ -317,7 +317,7 @@ fn overlap_both_directions_across_chunks() {
     }
 }
 
-/// Non-overlapping copies past one 64 MiB far-copy chunk, both orders.
+/// Non-overlapping copies past one 32 MiB far-copy chunk, both orders.
 #[test]
 fn far_copy_across_big_chunks() {
     let size = 256 * MIB as usize;
