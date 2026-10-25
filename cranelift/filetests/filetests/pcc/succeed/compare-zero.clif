@@ -74,9 +74,17 @@ block0(v0 ! mem(mt0, 0, 0): i64, v1: i32):
 
 ;; The egraph can give `sextend` of a compare result the fact of its equal
 ;; `uextend` (a compare is 0 or 1); it lowers to `movsbq` of the `setcc` byte.
+;; Here the fact is written by hand (no egraph at the default opt level).
 function %sextend_icmp(i32, i32) -> i64 {
 block0(v0: i32, v1: i32):
     v2 = icmp ult v0, v1
     v3 ! range(64, 0, 0xffffffff) = sextend.i64 v2
     return v3
+}
+
+;; A byte below the sign bit sign-extends to itself.
+function %sextend_below_signbit(i8) -> i64 {
+block0(v0 ! range(8, 0, 0x7f): i8):
+    v1 ! range(64, 0, 0x7f) = sextend.i64 v0
+    return v1
 }

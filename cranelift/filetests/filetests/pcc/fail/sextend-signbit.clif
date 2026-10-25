@@ -1,0 +1,11 @@
+test compile expect-fail
+set enable_pcc=true
+target x86_64
+
+;; A byte that may be 0x80 has its sign bit set: `sextend` gives
+;; 0xffff_ffff_ffff_ff80, outside 0..=0xff.
+function %sextend_signbit(i8) -> i64 {
+block0(v0 ! range(8, 0, 0x80): i8):
+    v1 ! range(64, 0, 0xff) = sextend.i64 v0
+    return v1
+}

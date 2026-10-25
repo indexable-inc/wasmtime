@@ -815,11 +815,17 @@ fn check_sext(
     if let Src::Reg(src) = src {
         let fact = match vcode.vreg_fact(src.into()) {
             Some(f) => Some(f.clone()),
-            None if is_setcc_result(vcode, src) => Some(Fact::Range {
-                bit_width: 8,
-                min: 0,
-                max: 1,
-            }),
+            // The lookup scans the function, so only when there is a stated
+            // fact to prove (with no source fact nothing propagates anyway).
+            None if vcode.vreg_fact(out.to_reg().into()).is_some()
+                && is_setcc_result(vcode, src) =>
+            {
+                Some(Fact::Range {
+                    bit_width: 8,
+                    min: 0,
+                    max: 1,
+                })
+            }
             None => None,
         };
         // A range over at least `from_bits` low bits whose maximum is below

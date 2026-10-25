@@ -1573,7 +1573,6 @@ impl<I: VCodeInst> VCode<I> {
         self.def_shadows.get(&vreg)
     }
 
-    /// The registers an instruction defines that carry facts.
     /// The instruction that defines `vreg` (vregs are SSA before register
     /// allocation), by a scan of the whole function; `None` for a block
     /// parameter. For the PCC checker's rare lookups.
@@ -1585,6 +1584,7 @@ impl<I: VCodeInst> VCode<I> {
         })
     }
 
+    /// The registers an instruction defines that carry facts.
     pub fn inst_defs_with_facts(&self, inst: InsnIndex) -> SmallVec<[VReg; 2]> {
         self.inst_operands(inst)
             .iter()
