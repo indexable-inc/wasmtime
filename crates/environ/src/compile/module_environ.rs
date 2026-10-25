@@ -290,6 +290,11 @@ pub struct ModuleTranslation<'data> {
     /// change them (see `ix_tables.rs`), indexed by `DefinedTableIndex`.
     /// Empty unless `Tunables::ix_table_devirt` is on.
     pub ix_static_tables: Vec<Option<crate::IxStaticTable>>,
+
+    /// ix fork: which entry polls to skip and where to add polls
+    /// (`ix_poll_plan.rs`). `None` unless `Tunables::poll_interruption` is
+    /// on and every body was understood, which means the old placement.
+    pub ix_poll_plan: Option<crate::IxPollPlan>,
 }
 
 /// Different forms of memory initialization that happens for a module.
@@ -359,6 +364,7 @@ impl<'data> ModuleTranslation<'data> {
             passive_data: Default::default(),
             ix_table_writes: Default::default(),
             ix_static_tables: Vec::new(),
+            ix_poll_plan: None,
         }
     }
 
@@ -487,6 +493,24 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
 
             Payload::End(offset) => {
                 self.result.types = Some(self.validator.end(offset)?);
+
+                if self.tunables.poll_interruption {
+                    self.result.ix_poll_plan = crate::IxPollPlan::compute(
+                        &self.result.module,
+                        &self.result.function_body_inputs,
+                    );
+                    match &self.result.ix_poll_plan {
+                        Some(plan) => {
+                            let (exempt, added) = plan.stats();
+                            log::debug!(
+                                "ix poll plan: {exempt} of {} functions skip the entry poll, \
+                                 {added} polls added",
+                                plan.funcs.len()
+                            );
+                        }
+                        None => log::debug!("ix poll plan: none (old placement)"),
+                    }
+                }
 
                 for (func, intrinsic) in self.result.module.ix_intrinsics.iter() {
                     if self.result.module.functions[*func].is_escaping()

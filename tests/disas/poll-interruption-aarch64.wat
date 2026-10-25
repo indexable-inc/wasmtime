@@ -3,11 +3,12 @@
 ;;! flags = ["-Wpoll-interruption=y"]
 ;;! objdump = "--traps=true"
 
-;; Poll interruption (ix fork): exactly one poll at function entry and
-;; one per loop iteration. A poll is a plain load of the store's poll word
-;; and a branch to a trap instruction carrying the `interrupt` trap code;
-;; no fence, and no load carries that code. `count` has a loop; `leaf` has
-;; none and polls only at entry.
+;; Poll interruption (ix fork): one poll per loop iteration. A poll is a
+;; plain load of the store's poll word and a branch to a trap instruction
+;; carrying the `interrupt` trap code; no fence, and no load carries that
+;; code. Both functions are bounded (`IxPollPlan`): `count` polls only at
+;; its loop header and `leaf` (no loop, no call) does not poll at all; its
+;; caller or the host-to-wasm entry polled before it.
 (module
   (func $count (param i32) (result i32) (local i32)
     (loop
@@ -18,30 +19,24 @@
 ;; wasm[0]::function[0]::count:
 ;;       stp     x29, x30, [sp, #-0x10]!
 ;;       mov     x29, sp
-;;       ldr     x8, [x2, #0x20]
-;;       ldr     x9, [x8]
-;;       cbnz    x9, #0x34
-;;   14: mov     w2, #0
-;;       ldr     x10, [x8]
-;;       cbnz    x10, #0x38
-;;   20: add     w2, w2, #1
+;;       mov     w3, #0
+;;       ldr     x7, [x2, #0x20]
+;;       ldr     x8, [x7]
+;;       cbnz    x8, #0x38
+;;   18: mov     x2, x3
+;;       add     w2, w2, #1
 ;;       cmp     w2, w4
-;;       b.lo    #0x18
-;;   2c: ldp     x29, x30, [sp], #0x10
+;;       b.hs    #0x30
+;;   28: mov     x3, x2
+;;       b       #0x10
+;;   30: ldp     x29, x30, [sp], #0x10
 ;;       ret
-;;   34: udf     #0xc11f
-;;       ╰─╼ trap: Normal(Interrupt)
 ;;   38: udf     #0xc11f
 ;;       ╰─╼ trap: Normal(Interrupt)
 ;;
 ;; wasm[0]::function[1]::leaf:
 ;;       stp     x29, x30, [sp, #-0x10]!
 ;;       mov     x29, sp
-;;       ldr     x4, [x2, #0x20]
-;;       ldr     x4, [x4]
-;;       cbnz    x4, #0x60
-;;   54: mov     w2, #7
+;;       mov     w2, #7
 ;;       ldp     x29, x30, [sp], #0x10
 ;;       ret
-;;   60: udf     #0xc11f
-;;       ╰─╼ trap: Normal(Interrupt)

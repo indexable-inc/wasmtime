@@ -1508,6 +1508,14 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
         }
     }
 
+    // ix fork: poll once on every entry from the host. Compiled code may skip
+    // the entry poll of a function that runs a bounded amount
+    // (`IxPollPlan`), so this keeps "an interrupted store runs no wasm until
+    // `rearm`" for every function, including those.
+    if store.0.poll_interrupt_pending() {
+        return Err(crate::Trap::Interrupt.into());
+    }
+
     // Stores some state of the runtime just before entering Wasm. Will be
     // restored upon exiting Wasm. Note that the `CallThreadState` that is
     // created by the `catch_traps` call below will store a pointer to this

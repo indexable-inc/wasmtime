@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 mod address_map;
 mod frame_table;
+mod ix_poll_plan;
 mod ix_tables;
 mod module_artifacts;
 mod module_environ;
@@ -26,6 +27,7 @@ mod trap_encoding;
 
 pub use self::address_map::*;
 pub use self::frame_table::*;
+pub use self::ix_poll_plan::*;
 pub use self::ix_tables::{IxStaticTable, IxTableWrites};
 pub use self::module_artifacts::*;
 pub use self::module_environ::*;

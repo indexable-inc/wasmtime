@@ -104,8 +104,10 @@ pub const IX_FEATURES: &[(&str, u32)] = &[
     // The `ix` intrinsics module; `IX_INTRINSICS_ABI`.
     ("intrinsics", crate::IX_INTRINSICS_ABI),
     // `poll_interruption`: the vmctx `poll_ptr` word, tested at every
-    // function entry and loop header.
-    ("poll-interruption", 1),
+    // function entry and loop header. 2: `IxPollPlan` skips the entry poll
+    // of bounded functions and adds polls before long returns and runs; the
+    // runtime polls on every host-to-wasm entry.
+    ("poll-interruption", 2),
     // `ix_static_call_indirect`: `IxDispatchPlan` in `Module`, the
     // `ix_dispatch` vmctx field. 2: rows truncated after their last match,
     // a zero entry falls back to the checked call, rows ranked by sites

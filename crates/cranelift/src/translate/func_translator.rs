@@ -314,6 +314,7 @@ fn parse_function_body(
         let operand_types =
             validate_op_and_get_operand_types(validator, environ, &mut operand_types, &op, pos)?;
 
+        environ.ix_poll_before_op(usize::try_from(pos).unwrap(), builder);
         environ.before_translate_operator(&op, operand_types, builder)?;
         translate_operator(validator, &op, operand_types, builder, environ)?;
         environ.after_translate_operator(&op, validator, builder)?;

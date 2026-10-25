@@ -236,6 +236,13 @@ pub struct FuncEnvironment<'module_environment> {
     /// function prologue and kept in a register like `epoch_ptr_var`.
     poll_ptr_var: cranelift_frontend::Variable,
 
+    /// ix fork: this function's poll placement (`IxPollPlan`): whether the
+    /// entry poll is skipped and before which operators to add one. `None`
+    /// means the old placement (entry and loop headers only).
+    ix_poll: Option<&'module_environment wasmtime_environ::IxFuncPoll>,
+    /// Index of the next entry of `ix_poll.checks` not yet reached.
+    ix_poll_next: usize,
+
     fuel_consumed: i64,
 
     /// A stack limit for when signals-based traps are disabled.
@@ -327,6 +334,10 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             epoch_deadline_var: Variable::reserved_value(),
             epoch_ptr_var: Variable::reserved_value(),
             poll_ptr_var: Variable::reserved_value(),
+            ix_poll: func_index
+                .and_then(|f| translation.module.defined_func_index(f))
+                .and_then(|d| Some(&translation.ix_poll_plan.as_ref()?.funcs[d])),
+            ix_poll_next: 0,
 
             // Start with at least one fuel being consumed because even empty
             // functions should consume at least some fuel.
@@ -854,7 +865,27 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             .poll_ptr()
             .load(&mut builder.cursor(), vmctx);
         builder.def_var(self.poll_ptr_var, poll_ptr);
-        self.poll_check(builder);
+        // An exempt function (`IxPollPlan`) runs a bounded amount before it
+        // returns, polls at a loop header, or calls something that polls.
+        if !self.ix_poll.is_some_and(|p| p.skip_entry) {
+            self.poll_check(builder);
+        }
+    }
+
+    /// ix fork: the poll `IxPollPlan` places before the operator at byte
+    /// offset `pos`, if any.
+    pub(crate) fn ix_poll_before_op(&mut self, pos: usize, builder: &mut FunctionBuilder<'_>) {
+        let Some(plan) = self.ix_poll else { return };
+        let checks = &plan.checks;
+        while self.ix_poll_next < checks.len() && checks[self.ix_poll_next] < pos {
+            self.ix_poll_next += 1;
+        }
+        if checks.get(self.ix_poll_next) == Some(&pos) {
+            self.ix_poll_next += 1;
+            if self.is_reachable() {
+                self.poll_check(builder);
+            }
+        }
     }
 
     /// One poll: load the store's poll word and trap with `TRAP_INTERRUPT`
@@ -5655,6 +5686,11 @@ impl FuncEnvironment<'_> {
     pub fn on_catch_block_entry(&mut self, builder: &mut FunctionBuilder) {
         if self.tunables.consume_fuel {
             self.fuel_load_into_var(builder);
+        }
+        // ix fork: a catch block polls, so an exception adds at most the
+        // thrower's own run since its last poll (`IxPollPlan`).
+        if self.tunables.poll_interruption && self.ix_poll.is_some() {
+            self.poll_check(builder);
         }
     }
 

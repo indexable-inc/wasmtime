@@ -493,6 +493,23 @@ impl Config {
             cfg.ix_wasm_cc(cc);
         }
 
+        // ix fork: poll interruption. The poll word is never set here, so
+        // this checks that the polls (and the skipped entry polls of
+        // `IxPollPlan`) leave results unchanged. `WASMTIME_FUZZ_IX_POLL=0|1`
+        // forces it.
+        if self.wasmtime.compiler_strategy == CompilerStrategy::CraneliftNative
+            && cfg!(all(unix, any(target_arch = "x86_64", target_arch = "aarch64")))
+            && self.wasmtime.signals_based_traps
+            && !self.wasmtime.epoch_interruption
+        {
+            let poll = match std::env::var("WASMTIME_FUZZ_IX_POLL") {
+                Ok(v) => v == "1",
+                Err(_) => self.wasmtime.ix_poll,
+            };
+            log::debug!("poll_interruption = {poll}");
+            cfg.poll_interruption(poll);
+        }
+
         if self.wasmtime.async_config != AsyncConfig::Disabled {
             log::debug!("async config in use {:?}", self.wasmtime.async_config);
             self.wasmtime.async_config.configure(&mut cfg);
@@ -652,6 +669,8 @@ pub struct WasmtimeConfig {
     inlining_max_callee_size: Option<u32>,
     /// ix fork: `Config::ix_wasm_cc`, modulo 2 (standard, wide).
     ix_wasm_cc: u8,
+    /// ix fork: `Config::poll_interruption` where it is supported.
+    ix_poll: bool,
     use_precompiled_cwasm: bool,
     async_stack_zeroing: bool,
     /// Configuration for the instance allocation strategy to use.

@@ -3869,6 +3869,14 @@
 (rule (is_nonzero val @ (value_type (is_single_register_gpr_type ty)))
   (let ((gpr Gpr val)) (CondResult.CC (x64_test ty gpr gpr) (CC.NZ))))
 
+;; A 64-bit load tested against zero compares in memory (`cmpq $0, mem`)
+;; instead of loading into a register first: one instruction and no
+;; register. This is the shape of the ix fork's poll check.
+;; Priority 8: above the overflow rules (an extern extractor overlaps them
+;; all for ISLE; a load is never one of their shapes).
+(rule 8 (is_nonzero (sinkable_load_64 load))
+  (CondResult.CC (x64_cmpq_mi_sxb (sink_load_64_to_gpr_mem_64 load) 0) (CC.NZ)))
+
 ;; Base case: i128
 (rule 1 (is_nonzero val @ (value_type $I128))
       (let ((lo Gpr (value_regs_get_gpr val 0))
