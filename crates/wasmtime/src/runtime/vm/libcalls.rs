@@ -362,13 +362,26 @@ fn passive_elem_segment_drop(
 }
 
 // Implementation of `memory.copy`.
+//
+// The compiled site has already bounds-checked both whole ranges (an
+// out-of-bounds op traps there, before this call, with nothing written), so
+// `dst..dst+len` and `src..src+len` are in bounds here.
+//
+// ix fork: an op of `BULK_CHUNKED_MIN` bytes or more is done in
+// `BULK_CHUNK`-byte pieces with a preemption check between pieces (see
+// `bulk_preempt`), so a multi-GiB copy cannot hold the thread for its whole
+// length. Smaller ops are one memmove, as upstream.
 unsafe fn memory_copy(
-    _store: &mut dyn VMStore,
+    store: &mut dyn VMStore,
     _instance: InstanceId,
     dst: *mut u8,
     src: *mut u8,
     len: usize,
 ) {
+    if len >= BULK_CHUNKED_MIN {
+        // SAFETY: same contract as this function.
+        return unsafe { memory_copy_chunked(store, dst, src, len) };
+    }
     let src = src.cast_const();
     // FIXME(#4203): this is known to not be sound in the presence of shared
     // memories.
@@ -376,21 +389,132 @@ unsafe fn memory_copy(
 }
 
 unsafe fn memory_fill(
-    _store: &mut dyn VMStore,
+    store: &mut dyn VMStore,
     _instance: InstanceId,
     dst: *mut u8,
     val: u32,
     len: usize,
 ) {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the libcall intentionally takes the raw 32-bit value, \
+                  and semantically that's intentionally truncated"
+    )]
+    let val = val as u8;
+    if len >= BULK_CHUNKED_MIN {
+        // SAFETY: same contract as this function.
+        return unsafe { memory_fill_chunked(store, dst, val, len) };
+    }
     // FIXME(#4203): this is known to not be sound in the presence of shared
     // memories.
-    unsafe {
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "the libcall intentionally takes the raw 32-bit value, \
-                      and semantically that's intentionally truncated"
-        )]
-        dst.write_bytes(val as u8, len);
+    unsafe { dst.write_bytes(val, len) }
+}
+
+/// ix fork: ops at least this long are chunked (2 MiB).
+const BULK_CHUNKED_MIN: usize = 2 << 20;
+/// ix fork: the size of one chunk (1 MiB). At ~10-30 GB/s that is about
+/// 30-100 us between preemption checks.
+const BULK_CHUNK: usize = 1 << 20;
+
+/// ix fork: the chunked `memory.copy`.
+///
+/// Direction: when `dst` lies inside `(src, src + len)` (the ranges overlap
+/// and `dst > src`) the chunks run back to front, else front to back. Each
+/// chunk is a memmove, so overlap inside a chunk is handled by it; across
+/// chunks, the order above guarantees no chunk reads source bytes an earlier
+/// chunk already overwrote (the same argument as a byte-wise memmove).
+///
+/// Nothing is held across chunks but the raw pointers and counters, and only
+/// atomics are read between chunks (no user code runs), so a non-shared
+/// memory cannot move or shrink mid-op; shared memories never move. Races
+/// with other threads on a shared memory are as upstream's single memmove
+/// (FIXME(#4203)).
+///
+/// # Safety
+///
+/// As `memory_copy`: both ranges are valid for `len` bytes. Called only from
+/// a libcall entered from wasm (needed for the trap unwind).
+#[cold]
+#[inline(never)]
+unsafe fn memory_copy_chunked(store: &mut dyn VMStore, dst: *mut u8, src: *mut u8, len: usize) {
+    let src = src.cast_const();
+    // `dst - src` (wrapping) in `1..len` means dst is inside the source range.
+    let d = (dst as usize).wrapping_sub(src as usize);
+    let backward = d != 0 && d < len;
+    let mut done = 0;
+    while done < len {
+        if done != 0 {
+            // SAFETY: entered from wasm; nothing with a destructor is live.
+            unsafe { bulk_preempt(store) };
+        }
+        let n = BULK_CHUNK.min(len - done);
+        let off = if backward { len - done - n } else { done };
+        // SAFETY: `off + n <= len`, inside both checked ranges.
+        unsafe { src.add(off).copy_to(dst.add(off), n) };
+        done += n;
+    }
+}
+
+/// ix fork: the chunked `memory.fill`; see `memory_copy_chunked`.
+///
+/// # Safety
+///
+/// As `memory_fill`: `dst` is valid for `len` bytes, entered from wasm.
+#[cold]
+#[inline(never)]
+unsafe fn memory_fill_chunked(store: &mut dyn VMStore, dst: *mut u8, val: u8, len: usize) {
+    let mut done = 0;
+    while done < len {
+        if done != 0 {
+            // SAFETY: entered from wasm; nothing with a destructor is live.
+            unsafe { bulk_preempt(store) };
+        }
+        let n = BULK_CHUNK.min(len - done);
+        // SAFETY: `done + n <= len`, inside the checked range.
+        unsafe { dst.add(done).write_bytes(val, n) };
+        done += n;
+    }
+}
+
+/// ix fork: the preemption check between chunks of a bulk op. Raises
+/// `Trap::Interrupt` (unwinding out of the libcall, as the `raise` builtin
+/// does; it does not return) when compiled code would raise it at a poll or
+/// epoch check:
+///
+/// - poll interruption: this store's poll word is set (one `SeqCst` load);
+/// - epoch interruption: the engine's epoch has reached the store's deadline
+///   and the store's deadline behaviour is the default trap (no callback, no
+///   debug handler). A callback can run arbitrary code, including growing
+///   and so moving this memory, so it is never run mid-op: with a callback
+///   installed the op runs to the end as upstream and the compiled code's
+///   next epoch check calls it.
+///
+/// Pulley is skipped: its unwind returns to the interpreter, which does not
+/// expect one from this libcall.
+///
+/// # Safety
+///
+/// Wasm must be on the stack (entered via a libcall trampoline) and no Rust
+/// destructors may be live in the caller's frames up to it.
+#[inline]
+unsafe fn bulk_preempt(store: &mut dyn VMStore) {
+    let interrupt = {
+        let opaque: &mut StoreOpaque = store;
+        if opaque.engine().is_pulley() {
+            return;
+        }
+        let poll = opaque.poll_interrupt_pending();
+        #[cfg(target_has_atomic = "64")]
+        let poll = poll || {
+            opaque.engine().tunables().epoch_interruption
+                && opaque.engine().current_epoch() >= opaque.get_epoch_deadline()
+                && store.epoch_deadline_traps()
+        };
+        poll
+    };
+    if interrupt {
+        // SAFETY: as this function.
+        unsafe { crate::runtime::vm::traphandlers::raise_trap_from_libcall(store, Trap::Interrupt) }
     }
 }
 

@@ -2433,6 +2433,15 @@ unsafe impl<T> VMStore for StoreInner<T> {
     }
 
     #[cfg(target_has_atomic = "64")]
+    fn epoch_deadline_traps(&self) -> bool {
+        #[cfg(feature = "debug")]
+        if self.debug_handler.is_some() {
+            return false;
+        }
+        self.epoch_deadline_behavior.is_none()
+    }
+
+    #[cfg(target_has_atomic = "64")]
     fn new_epoch_updated_deadline(&mut self) -> Result<UpdateDeadline> {
         // Temporarily take the configured behavior to avoid mutably borrowing
         // multiple times.

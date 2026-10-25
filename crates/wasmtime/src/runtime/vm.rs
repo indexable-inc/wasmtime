@@ -236,6 +236,13 @@ pub unsafe trait VMStore: 'static {
     #[cfg(target_has_atomic = "64")]
     fn new_epoch_updated_deadline(&mut self) -> Result<crate::UpdateDeadline>;
 
+    /// ix fork: whether reaching the epoch deadline simply traps with
+    /// `Trap::Interrupt`, running no embedder code (no deadline callback and
+    /// no debug handler). Lets a bulk libcall preempt itself without running
+    /// code that could move linear memory under it.
+    #[cfg(target_has_atomic = "64")]
+    fn epoch_deadline_traps(&self) -> bool;
+
     #[cfg(feature = "component-model-async")]
     fn component_async_store(
         &mut self,

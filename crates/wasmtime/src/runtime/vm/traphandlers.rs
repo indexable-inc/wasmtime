@@ -98,6 +98,25 @@ pub(super) unsafe fn raise_preexisting_trap(store: &mut dyn VMStore) {
     tls::with(|info| unsafe { info.unwrap().unwind(store) })
 }
 
+/// ix fork: records `trap` and unwinds, from inside a libcall whose ABI has no
+/// trap sentinel (so the compiled call site never checks one). This is what
+/// the `raise` builtin does, with the trap recorded here instead of by an
+/// earlier libcall return. Only for native code: under Pulley the unwind
+/// returns, so callers must not use this there.
+///
+/// # Safety
+///
+/// As `raise_preexisting_trap`: wasm is on the stack, entered through a
+/// libcall trampoline that recorded the exit FP and PC, nothing is recorded
+/// in `unwind` yet, and no Rust destructors are live up to the trampoline.
+pub(super) unsafe fn raise_trap_from_libcall(store: &mut dyn VMStore, trap: wasmtime_environ::Trap) {
+    tls::with(|info| {
+        let info = info.unwrap();
+        info.record_unwind(UnwindReason::from(Error::from(trap)));
+        unsafe { info.unwind(store) }
+    })
+}
+
 /// Invokes the closure `f` and handles any error/panic/trap that happens
 /// within.
 ///
