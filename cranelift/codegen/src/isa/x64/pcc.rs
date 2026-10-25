@@ -379,7 +379,11 @@ fn compute_asm_addr(
 /// A narrower fact says nothing about bits above its width, so it is not used.
 fn compute_leal(ctx: &FactContext, vcode: &VCode<Inst>, amode: &asm::Amode<Gpr>) -> Option<Fact> {
     let range = |r: Reg| match get_fact_or_default(vcode, r, 64) {
-        Fact::Range { bit_width, min, max } if bit_width >= 32 => Some(Fact::Range {
+        Fact::Range {
+            bit_width,
+            min,
+            max,
+        } if bit_width >= 32 => Some(Fact::Range {
             bit_width: 64,
             min,
             max,

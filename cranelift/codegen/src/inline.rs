@@ -795,7 +795,8 @@ fn inline_pcc(
         _ => None,
     };
     for cs in callee.memory_types.keys() {
-        if mt_map[cs].is_some() || !matches!(callee.memory_types[cs], MemoryTypeData::Struct { .. }) {
+        if mt_map[cs].is_some() || !matches!(callee.memory_types[cs], MemoryTypeData::Struct { .. })
+        {
             continue;
         }
         for &ks in &caller_structs {
