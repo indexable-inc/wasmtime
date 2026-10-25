@@ -857,14 +857,18 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     /// and poll once, at the same place `epoch_function_entry` checks.
     fn poll_function_entry(&mut self, builder: &mut FunctionBuilder<'_>) {
         debug_assert!(self.poll_ptr_var.is_reserved_value());
-        self.poll_ptr_var = builder.declare_var(self.pointer_type());
-        let vmctx = self.vmctx_val(&mut builder.cursor());
-        let poll_ptr = self
-            .alias_regions
-            .vmctx()
-            .poll_ptr()
-            .load(&mut builder.cursor(), vmctx);
-        builder.def_var(self.poll_ptr_var, poll_ptr);
+        // x86_64 reloads the pointer at every poll (see `poll_check`);
+        // elsewhere it is loaded once here and kept in a variable.
+        if self.isa.triple().architecture != target_lexicon::Architecture::X86_64 {
+            self.poll_ptr_var = builder.declare_var(self.pointer_type());
+            let vmctx = self.vmctx_val(&mut builder.cursor());
+            let poll_ptr = self
+                .alias_regions
+                .vmctx()
+                .poll_ptr()
+                .load(&mut builder.cursor(), vmctx);
+            builder.def_var(self.poll_ptr_var, poll_ptr);
+        }
         // An exempt function (`IxPollPlan`) runs a bounded amount before it
         // returns, polls at a loop header, or calls something that polls.
         if !self.ix_poll.is_some_and(|p| p.skip_entry) {
@@ -903,8 +907,26 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
     /// `notrap`: the word is host memory that is always readable, so a fault
     /// on it is a bug and aborts, and the only `TRAP_INTERRUPT` site is the
     /// trap instruction.
+    ///
+    /// On x86_64 the pointer is reloaded from vmctx at every poll, with a
+    /// volatile load so it is not merged back into one value live across
+    /// the function: a pointer kept live through loops costs a register,
+    /// and regalloc spilled it and reloaded it from the stack at most loop
+    /// polls anyway (Turso: half of them). With the x64 `cmpq $0, mem`
+    /// lowering a poll is `mov 0x20(vmctx), r; cmpq $0, (r); jne`.
     fn poll_check(&mut self, builder: &mut FunctionBuilder<'_>) {
-        let cell = builder.use_var(self.poll_ptr_var);
+        let cell = if self.poll_ptr_var.is_reserved_value() {
+            let vmctx = self.vmctx_val(&mut builder.cursor());
+            let mut load = self
+                .alias_regions
+                .vmctx()
+                .poll_ptr()
+                .to_deferred_load(builder.func);
+            load.flags = load.flags.with_volatile();
+            load.emit(&mut builder.cursor(), vmctx)
+        } else {
+            builder.use_var(self.poll_ptr_var)
+        };
         let region = self.alias_regions.vmctx().poll_word().region(builder.func);
         let flags = MemFlagsData::new()
             .with_aligned()

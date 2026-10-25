@@ -12,11 +12,12 @@
 //! Hostile tenants must not run unbounded between two polls. Count cost in
 //! wasm operators: every operator costs 1, a `block`/`loop`/`if`/`try_table`
 //! costs 2 (it also pays for its `else`/`end`), and a call costs 1 plus what
-//! the callee may run before it polls (below). Each operator lowers to a
-//! bounded number of machine instructions; the only operators whose own run
-//! is not bounded by a constant are the chunked bulk libcalls, which run at
-//! most one chunk before they poll (`bulk_preempt`), and that is unchanged
-//! here.
+//! the callee may run before it polls (below). Most operators lower to a
+//! bounded number of machine instructions. Those that do not are unchanged
+//! here: the chunked bulk libcalls run at most one chunk before they poll
+//! (`bulk_preempt`); `table.fill` and the GC `array.new`/`array.fill` loops
+//! that cannot use memset run `len` iterations and poll once after;
+//! `memory.atomic.wait` blocks in the host; a GC allocation may collect.
 //!
 //! The pass keeps, at each point of a function, an upper bound `C` on the
 //! cost this frame has run since the last poll, its own *local* cost. It is
@@ -44,34 +45,43 @@
 //! `ESCAPING_LIMIT` when it can be reached from outside (exported, in a
 //! table, `ref.func`) or is the target of a `return_call`, or
 //! `INTERNAL_LIMIT` otherwise. A function with any `call_indirect`,
-//! `call_ref` or call to a non-intrinsic import has `B > ESCAPING_LIMIT`
-//! and so is never exempt. So exempt functions only call, directly, other
-//! functions of their module that are exempt (and further down the call
-//! DAG) or that poll at entry: a call cycle always contains a function that
-//! polls at entry, and so does a tail-call cycle.
+//! `call_ref` or call to a non-intrinsic import has `B > ESCAPING_LIMIT`,
+//! so it is exempt only if nothing outside the module can reach it and no
+//! `return_call` names it; it is then only ever entered by a direct call
+//! from this module, whose caller is charged its whole `B`. A cycle of
+//! direct calls is an SCC, which polls; any other cycle passes through an
+//! indirect call, `call_ref`, an import or a `return_call`, whose target
+//! either polls at entry or has `B <= ESCAPING_LIMIT`, and a function on
+//! the cycle makes that call, so its `B` (or its caller's, up the direct
+//! chain to the first function that polls) exceeds that limit. A tail-call
+//! cycle is the same.
 //!
 //! In a function that keeps its entry poll the pass adds a poll before any
 //! operator that would take `C` past `SEGMENT_LIMIT`, and before any return
 //! (`return`, the final `end`, a branch to the function's own label, a
 //! `return_call*` whose callee does not poll at entry) that would leave with
-//! `C > RETURN_LIMIT`. Exempt functions get no added polls: their `C` stays
-//! below their `B` limit, which is below both.
+//! `C > RETURN_LIMIT`. Exempt functions get no added polls: their whole
+//! run is charged to the caller (`1 + B`), so the caller's limits cover it.
 //!
 //! The *chain*. When a callee returns, its caller runs on with no poll in
 //! between, and so on up the stack: without the return limit a deep
 //! recursion whose frames each run a long straight-line tail after the
-//! recursive call ran `depth x tail` with no poll (true before this pass
-//! too). Now each frame that polls at entry returns with local `C <=
-//! RETURN_LIMIT` (an exempt callee's whole run, and a `return_call`'s
-//! callee, are part of the caller's local cost). So between two polls a
-//! thread runs at most
+//! recursive call ran `depth x tail` with no poll, the tail as long as
+//! the function (true before this pass). Now each frame that polls at
+//! entry returns with local `C <= RETURN_LIMIT` (an exempt callee's whole
+//! run, and a `return_call`'s callee, are part of the caller's local cost).
+//! So between two polls a thread runs at most
 //!
 //! ```text
 //!     SEGMENT_LIMIT + RETURN_LIMIT x (D - 1)   wasm operators,
 //! ```
 //!
 //! where `D` is the number of wasm frames returned through, at most the
-//! frames that fit on the wasm stack. An exception lands in a catch block
+//! frames that fit on the wasm stack. `RETURN_LIMIT` is `SEGMENT_LIMIT`
+//! (4096 x D): a lower return limit adds a poll to every call of a function
+//! with a long tail, and on Turso 256 cost more than the skipped entry polls
+//! saved (`bench/results/2026-10-25-poll-cheap` in wasm-host). The machinery
+//! stays so the per-frame constant can be lowered. An exception lands in a catch block
 //! that polls (`FuncEnvironment::on_catch_block_entry`), so a throw adds at
 //! most the thrower's local cost. Host code is not counted; entering wasm
 //! from the host polls in the runtime (`invoke_wasm_and_catch_traps`), so
@@ -80,13 +90,16 @@
 //! Static bound per exempt function: `B(f) <= INTERNAL_LIMIT` operators
 //! (`ESCAPING_LIMIT` if reachable from outside), whatever it calls.
 //!
-//! The pass reads unvalidated bodies. Anything it does not understand (a
-//! parse error, a bad label or function index, legacy exceptions, stack
-//! switching, an operator with custom arity it does not know) makes it give
-//! up on the whole module, which then gets the old placement: a poll at
-//! every entry and loop header, nothing skipped and nothing added. Unknown
-//! operators default to that, so a new control operator in wasmparser cannot
-//! be miscounted as straight-line code.
+//! The pass reads unvalidated bodies. Anything the structured walk does not
+//! understand (legacy exceptions, stack switching, an operator with custom
+//! arity it does not know, a bad label or function index) makes it give up
+//! on the whole module, which then gets the structure-free [`fallback`]
+//! placement: nothing skipped, a poll after every operator that is not
+//! straight-line, the same segment and return limits. Unknown operators
+//! count as not straight-line, so a new control operator in wasmparser
+//! cannot be miscounted. Only a body that does not parse gets no plan (and
+//! the old placement), and function validation rejects such a module
+//! before any of its code runs.
 
 use crate::prelude::*;
 use crate::{DefinedFuncIndex, FuncIndex, FunctionBodyData, Module, PrimaryMap};
@@ -100,7 +113,7 @@ pub const IX_POLL_ESCAPING_LIMIT: u64 = 128;
 /// Max `B` of other exempt functions.
 pub const IX_POLL_INTERNAL_LIMIT: u64 = 1024;
 /// Max local cost at a return of a function that polls at entry.
-pub const IX_POLL_RETURN_LIMIT: u64 = 256;
+pub const IX_POLL_RETURN_LIMIT: u64 = 4096;
 /// Max local cost anywhere in a function that polls at entry.
 pub const IX_POLL_SEGMENT_LIMIT: u64 = 4096;
 
@@ -108,7 +121,7 @@ const _: () = {
     // An unknown tail callee (`1 + ESCAPING_LIMIT` after a poll) must fit
     // under the return limit, and an exempt callee under the segment limit.
     assert!(1 + IX_POLL_ESCAPING_LIMIT <= IX_POLL_RETURN_LIMIT);
-    assert!(IX_POLL_RETURN_LIMIT < IX_POLL_SEGMENT_LIMIT);
+    assert!(IX_POLL_RETURN_LIMIT <= IX_POLL_SEGMENT_LIMIT);
     assert!(1 + IX_POLL_INTERNAL_LIMIT <= IX_POLL_SEGMENT_LIMIT);
 };
 
@@ -128,6 +141,8 @@ pub struct IxFuncPoll {
 pub struct IxPollPlan {
     /// Indexed by defined function.
     pub funcs: PrimaryMap<DefinedFuncIndex, IxFuncPoll>,
+    /// Every function got the structure-free [`fallback`] placement.
+    pub fallback: bool,
 }
 
 impl IxPollPlan {
@@ -138,9 +153,28 @@ impl IxPollPlan {
         (exempt, added)
     }
 
-    /// Plan every defined function of `module`, or `None` (old placement)
-    /// if any body is beyond this pass.
+    /// Plan every defined function of `module`. If any body is beyond the
+    /// structured walk, every function gets the [`fallback`] placement
+    /// instead. `None` only if a body does not parse (the module is
+    /// invalid and is never compiled).
     pub fn compute(
+        module: &Module,
+        bodies: &PrimaryMap<DefinedFuncIndex, FunctionBodyData<'_>>,
+    ) -> Option<IxPollPlan> {
+        if let Some(plan) = Self::structured(module, bodies) {
+            return Some(plan);
+        }
+        let mut funcs = PrimaryMap::with_capacity(bodies.len());
+        for (_, data) in bodies.iter() {
+            funcs.push(fallback(&data.body)?);
+        }
+        Some(IxPollPlan {
+            funcs,
+            fallback: true,
+        })
+    }
+
+    fn structured(
         module: &Module,
         bodies: &PrimaryMap<DefinedFuncIndex, FunctionBodyData<'_>>,
     ) -> Option<IxPollPlan> {
@@ -227,8 +261,60 @@ impl IxPollPlan {
         for (f, _) in bodies.iter() {
             out.push(core::mem::take(&mut funcs[f]));
         }
-        Some(IxPollPlan { funcs: out })
+        Some(IxPollPlan {
+            funcs: out,
+            fallback: false,
+        })
     }
+}
+
+/// Whether `op` is straight-line: no branch, call, return, throw, block
+/// boundary or stack switch.
+fn is_straight_line(op: &Operator<'_>) -> bool {
+    matches!(
+        op,
+        Operator::StructNew { .. }
+            | Operator::StructNewDesc { .. }
+            | Operator::ArrayNewFixed { .. }
+            | Operator::TypedSelectMulti { .. }
+    ) || op_is_plain(op)
+}
+
+/// The placement for a module the structured walk gives up on (legacy
+/// exceptions, stack switching, an operator it does not know). It needs no
+/// structure: the entry polls, and so does the operator after every
+/// operator that is not straight-line, so every control transfer lands on
+/// a poll (a branch target follows an `end`, `else`, `catch` or `loop`; a
+/// call, `resume` or `suspend` continues after it; a callee starts at its
+/// entry poll). What runs between two polls is one straight-line run,
+/// capped at `SEGMENT_LIMIT` operators, and a frame leaves after at most
+/// `RETURN_LIMIT` since its last poll, as in the structured placement.
+/// Nothing is skipped, and it polls far more often; only modules using
+/// those features pay for it.
+fn fallback(body: &FunctionBody<'_>) -> Option<IxFuncPoll> {
+    let mut checks = Vec::new();
+    let mut run = 0u64;
+    let mut after_transfer = false;
+    let mut ops = body.get_operators_reader().ok()?;
+    while !ops.eof() {
+        let pos = usize::try_from(ops.original_position()).ok()?;
+        let op = ops.read().ok()?;
+        let straight = is_straight_line(&op);
+        if after_transfer
+            || run >= IX_POLL_SEGMENT_LIMIT
+            || (!straight && run >= IX_POLL_RETURN_LIMIT)
+        {
+            checks.push(pos);
+            run = 0;
+        }
+        run += 1;
+        after_transfer = !straight;
+    }
+    Some(IxFuncPoll {
+        skip_entry: false,
+        checks: checks.into_boxed_slice(),
+        bound: 0,
+    })
 }
 
 struct CallGraph {

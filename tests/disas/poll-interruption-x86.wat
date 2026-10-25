@@ -8,8 +8,9 @@
 ;; carrying the `interrupt` trap code; no fence, and no load carries that
 ;; code. Both functions are bounded (`IxPollPlan`): `count` polls only at
 ;; its loop header and `leaf` (no loop, no call) does not poll at all; its
-;; caller or the host-to-wasm entry polled before it. On x86 the
-;; poll is `cmpq $0, (ptr)`: the word is compared in memory.
+;; caller or the host-to-wasm entry polled before it. On x86 each poll
+;; reloads the word's pointer from vmctx and compares the word in memory:
+;; `movq 0x20(vmctx), ptr; cmpq $0, (ptr); jne`.
 (module
   (func $count (param i32) (result i32) (local i32)
     (loop
@@ -21,12 +22,12 @@
 ;;       pushq   %rbp
 ;;       movq    %rsp, %rbp
 ;;       xorl    %eax, %eax
-;;       movq    0x20(%rdi), %rdi
-;;       cmpq    $0, (%rdi)
+;;       movq    0x20(%rdi), %r8
+;;       cmpq    $0, (%r8)
 ;;       jne     0x27
 ;;   14: addl    $1, %eax
 ;;       cmpl    %edx, %eax
-;;       jb      0xa
+;;       jb      6
 ;;   22: movq    %rbp, %rsp
 ;;       popq    %rbp
 ;;       retq

@@ -503,12 +503,15 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                         Some(plan) => {
                             let (exempt, added) = plan.stats();
                             log::debug!(
-                                "ix poll plan: {exempt} of {} functions skip the entry poll, \
+                                "ix poll plan{}: {exempt} of {} functions skip the entry poll, \
                                  {added} polls added",
+                                if plan.fallback { " (fallback)" } else { "" },
                                 plan.funcs.len()
                             );
                         }
-                        None => log::debug!("ix poll plan: none (old placement)"),
+                        // A body did not parse: function validation rejects
+                        // the module before any code runs.
+                        None => log::debug!("ix poll plan: none (invalid body)"),
                     }
                 }
 

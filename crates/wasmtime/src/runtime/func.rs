@@ -1511,8 +1511,12 @@ pub(crate) fn invoke_wasm_and_catch_traps<T>(
     // ix fork: poll once on every entry from the host. Compiled code may skip
     // the entry poll of a function that runs a bounded amount
     // (`IxPollPlan`), so this keeps "an interrupted store runs no wasm until
-    // `rearm`" for every function, including those.
+    // `rearm`" for every function, including those. Like a trap inside
+    // wasm, it poisons a component store: the call stops partway (say,
+    // after the export but before `post_return`).
     if store.0.poll_interrupt_pending() {
+        #[cfg(feature = "component-model")]
+        store.0.set_trapped();
         return Err(crate::Trap::Interrupt.into());
     }
 
