@@ -5,7 +5,9 @@
 //! that took base Cranelift close to a minute or several GB. With the
 //! default `regalloc_budget = reject`, each one is either rejected by the
 //! register allocator's work budget or compiles within it (which bounds the
-//! allocator's work linearly in the function's size). The fuel counts
+//! allocator's work linearly in the function's size). A function over the
+//! budget is compiled once more at `opt_level = none` before it is
+//! rejected, which is what lets `ifelse` through. The fuel counts
 //! themselves are pinned in regalloc2's `fuzzing::ion::budget` tests.
 
 #![cfg(not(miri))]
@@ -141,6 +143,62 @@ fn widevars(n: usize) -> String {
     o
 }
 
+/// `WIDE` distinct i64 loads left on the operand stack (loads are not pure,
+/// so the egraph cannot sink them to their uses), and their sum.
+const WIDE: usize = 65536;
+
+fn wide_loads(o: &mut String) {
+    for k in 0..WIDE {
+        let _ = writeln!(o, "    local.get 1 i64.load offset={}", 8 * k);
+    }
+}
+
+fn wide_sum(o: &mut String) {
+    for _ in 1..WIDE {
+        o.push_str("    i64.add\n");
+    }
+}
+
+/// `WIDE` values live across `n` `br_if`s to one outer label: the exit
+/// block has `n` predecessors, and Ion's first liveness step unions its
+/// live set into each of them (the cap must stop that union by union).
+fn brjoin(n: usize) -> String {
+    let mut o = String::from(
+        "(module\n  (memory 16)\n  (func (export \"f\") (param i32 i32) (result i64)\n",
+    );
+    wide_loads(&mut o);
+    o.push_str("    block $out\n");
+    for _ in 0..n {
+        o.push_str("      local.get 0 br_if $out\n");
+    }
+    o.push_str("    end\n");
+    wide_sum(&mut o);
+    o.push_str("  )\n)\n");
+    o
+}
+
+/// `WIDE` values live across `n` `if`s whose other arm returns. The values
+/// are dead in the returning blocks, so where those sit between blocks the
+/// values are live in, each value gets a live range per block. The arm
+/// alternates so that either layout order interleaves half of them.
+fn ifret(n: usize) -> String {
+    let mut o = String::from(
+        "(module\n  (memory 16)\n  (func (export \"f\") (param i32 i32) (result i64)\n",
+    );
+    wide_loads(&mut o);
+    for b in 0..n {
+        let _ = writeln!(o, "    local.get 0 i32.const {} i32.and", 1u32 << (b % 31));
+        if b % 2 == 0 {
+            o.push_str("    if i64.const 0 return end\n");
+        } else {
+            o.push_str("    if else i64.const 0 return end\n");
+        }
+    }
+    wide_sum(&mut o);
+    o.push_str("  )\n)\n");
+    o
+}
+
 fn engine(budget: Option<&str>, parallel: bool) -> Engine {
     let mut config = Config::new();
     config.parallel_compilation(parallel);
@@ -170,13 +228,18 @@ fn assert_rejected(engine: &Engine, wat: &str, what: &str) -> String {
 }
 
 /// Every harness case at its hostile size is rejected or compiles within the
-/// budget, with the default setting (`reject`).
+/// budget, with the default setting (`reject`). ifelse 16384 is over the
+/// budget at `opt_level = speed` and compiles on the retry at `none`.
+/// Takes minutes in a debug build, so it runs in release only.
 #[test]
+#[cfg_attr(debug_assertions, ignore)]
 fn ix_compile_dos_cases_rejected_or_bounded() {
     let e = engine(None, false);
-    assert_rejected(&e, &ifelse(16384), "ifelse 16384");
     assert_rejected(&e, &ifelse_flat(8192), "ifelse_flat 8192");
+    assert_rejected(&e, &brjoin(100_000), "brjoin 100000");
+    assert_rejected(&e, &ifret(512), "ifret 512");
     for (what, wat) in [
+        ("ifelse 16384", ifelse(16384)),
         ("copies 49000", copies(49000)),
         ("band 20000", band(20000)),
         ("widevars 32000", widevars(32000)),
@@ -190,15 +253,18 @@ fn ix_compile_dos_cases_rejected_or_bounded() {
 /// The reject is deterministic: the same module is rejected the same way on
 /// every compile, serial or parallel, while a smaller one of the same shape
 /// compiles. `fallback` allocates the rejected function with the
-/// single-pass allocator instead.
+/// single-pass allocator instead. ifelse 4096, which is over the budget at
+/// `speed`, compiles through the retry at `none`.
 #[test]
 fn ix_compile_dos_reject_is_deterministic() {
-    let wat = ifelse(4096);
-    let first = assert_rejected(&engine(None, false), &wat, "ifelse 4096");
+    let wat = ifelse_flat(4096);
+    let first = assert_rejected(&engine(None, false), &wat, "ifelse_flat 4096");
     for parallel in [false, true, false] {
         let e = engine(Some("reject"), parallel);
-        assert_eq!(assert_rejected(&e, &wat, "ifelse 4096"), first);
+        assert_eq!(assert_rejected(&e, &wat, "ifelse_flat 4096"), first);
     }
-    Module::new(&engine(None, false), &ifelse(256)).expect("ifelse 256 compiles");
-    Module::new(&engine(Some("fallback"), false), &wat).expect("fallback compiles ifelse 4096");
+    Module::new(&engine(None, false), &ifelse_flat(256)).expect("ifelse_flat 256 compiles");
+    Module::new(&engine(Some("fallback"), false), &wat)
+        .expect("fallback compiles ifelse_flat 4096");
+    Module::new(&engine(None, false), &ifelse(4096)).expect("the retry compiles ifelse 4096");
 }

@@ -16,14 +16,20 @@ use regalloc2::{Algorithm, Function as _, RegAllocError, RegallocOptions};
 /// instruction, block or virtual register), see the `regalloc_budget`
 /// setting and `RegallocOptions::fuel`.
 ///
-/// Calibration (x86-64, opt_level speed, 2026-10-25): over the 36 868
-/// functions of three real modules (Turso 13 MB, Kusama runtime 8.8 MB,
-/// SpiderMonkey 7.4 MB) the most fuel any function used was 43 per unit
-/// (p99 18, median 2), and the most liveness-set words 4.0 per unit (p99
-/// 1.1) against the cap of 16 (`ion::FUEL_PER_LIVE_WORD`). Small functions
-/// sit under `REGALLOC_FUEL_MIN`; the largest used 10% of it. The hostile
-/// cases in wasm-host bench/results/2026-10-25-compile-dos hit it within a
-/// second for 16k if/else diamonds (base: 55 s, 4.3 GB).
+/// Calibration (2026-10-25, x86-64 and aarch64, opt_level speed and none):
+/// over the 49 474 functions of four real modules (Turso 13 MB, Kusama
+/// runtime 8.8 MB, SpiderMonkey 7.4 MB, a Go 1.26 wasip1 build) the most
+/// fuel any function used was 55 per unit (p99 22, median 3), and the most
+/// liveness words (set words plus `ion::RANGE_WORDS` per live range) 7.1
+/// per unit against the cap of 16 (`ion::FUEL_PER_LIVE_WORD`). Binaryen
+/// asyncify output is the exception: in SpiderMonkey and Kusama asyncified,
+/// 4 of 24 899 functions need up to 953 fuel and 115 words per unit (651
+/// and 85 at opt_level none), so under `reject` those modules fail and need
+/// `fallback`. At the cap, the whole compile peaks at about 600 bytes of RSS
+/// per unit on the hostile cases in wasm-host
+/// bench/results/2026-10-25-compile-dos (100k `br_if`s to one label with
+/// 64k live values: 1.48M units, rejected in 2.5 s at 841 MB; base: over
+/// 150 s and 13.6 GB).
 pub const REGALLOC_FUEL_PER_UNIT: u64 = 256;
 
 /// Budget floor, so small functions never hit it.
@@ -127,10 +133,11 @@ pub fn compile<B: LowerBackend + TargetIsa>(
             }
         } else if let Some(fuel) = options.fuel {
             log::debug!(
-                "regalloc budget: used {} of {} units, live words peak {} ({} insts, {} blocks, {} vregs)",
+                "regalloc budget: used {} of {} units, live words peak {}, ranges {} ({} insts, {} blocks, {} vregs)",
                 regalloc_ctx.output.stats.fuel_used,
                 fuel,
                 regalloc_ctx.output.stats.live_words_peak,
+                regalloc_ctx.output.stats.final_liverange_count,
                 vcode.num_insts(),
                 vcode.num_blocks(),
                 vcode.num_vregs(),
