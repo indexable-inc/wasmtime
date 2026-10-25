@@ -30,6 +30,7 @@ mod ext;
 mod gc;
 mod hostcall;
 mod ix_intrinsics;
+pub mod ix_pinned_sp;
 mod key;
 mod module;
 mod module_artifacts;

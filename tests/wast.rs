@@ -112,6 +112,16 @@ fn run_wast(test: &WastTest, config: WastConfig) -> wasmtime::Result<()> {
         cfg.cranelift_wasmtime_debug_checks(true);
     }
 
+    // ix fork: run the whole suite with the shadow stack pointer global in
+    // the pinned register (`WASMTIME_TEST_IX_PINNED_SP=1`). Native Cranelift
+    // only, and not with stack switching, which the option refuses.
+    if matches!(config.compiler, Compiler::CraneliftNative)
+        && !test_config.stack_switching()
+        && std::env::var("WASMTIME_TEST_IX_PINNED_SP").is_ok()
+    {
+        cfg.ix_pinned_sp(true);
+    }
+
     // By default we'll allocate huge chunks (6gb) of the address space for each
     // linear memory. This is typically fine but when we emulate tests with QEMU
     // it turns out that it causes memory usage to balloon massively. Leave a

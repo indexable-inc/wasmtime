@@ -1,4 +1,5 @@
 use crate::TRAP_INTERNAL_ASSERT;
+use wasmtime_environ::ix_pinned_sp as psp;
 use crate::alias_region::AliasRegions;
 use crate::debug::DwarfSectionRelocTarget;
 use crate::func_environ::FuncEnvironment;
@@ -592,6 +593,7 @@ impl wasmtime_environ::Compiler for Compiler {
             &mut context.func,
             &mut func_env,
         )?;
+        func_env.ix_psp_insert_reloads(&mut context.func);
 
         let needs_gc_heap = func_env.needs_gc_heap();
 
@@ -623,12 +625,23 @@ impl wasmtime_environ::Compiler for Compiler {
                 let sig = translation.module.functions[func_index]
                     .signature
                     .unwrap_module_type_index();
+                // ix fork: the designated global's slot, for the bench-only
+                // `REG_ONLY` mode that keeps it only in the register.
+                let ix_psp_slot = translation.ix_pinned_sp.as_ref().and_then(|p| {
+                    let def = translation.module.defined_global_index(p.global)?;
+                    let offsets = wasmtime_environ::VMOffsets::new(
+                        self.isa.pointer_bytes(),
+                        &translation.module,
+                    );
+                    Some(i32::try_from(offsets.globals().at(def)).unwrap())
+                });
                 self.array_to_wasm_trampoline(
                     key,
                     FuncKey::DefinedWasmFunction(module_index, def_func_index),
                     types[sig].unwrap_func(),
                     symbol,
                     wasmtime_environ::VMCONTEXT_MAGIC,
+                    ix_psp_slot,
                     |alias_regions, _pointer_type, cursor, vmctx| {
                         alias_regions.vmctx().store_context().load(cursor, vmctx)
                     },
@@ -677,6 +690,7 @@ impl wasmtime_environ::Compiler for Compiler {
                         ty,
                         symbol,
                         wasmtime_environ::VMCONTEXT_MAGIC,
+                        None,
                         |alias_regions, _pointer_type, cursor, vmctx| {
                             alias_regions.vmctx().store_context().load(cursor, vmctx)
                         },
@@ -1461,6 +1475,7 @@ impl Compiler {
         callee_sig: &WasmFuncType,
         symbol: &str,
         expected_vmctx_magic: u32,
+        ix_psp_slot: Option<i32>,
         mut load_vm_store_context: impl FnMut(
             &mut AliasRegions<u8>,
             ir::Type,
@@ -1537,6 +1552,31 @@ impl Compiler {
             try_call_block,
         );
 
+        // ix fork (`Tunables::ix_pinned_sp`): wasm code owns the pinned
+        // register, and with `enable_pinned_reg` no Cranelift prologue saves
+        // it, but for the host calling this trampoline it is an ordinary
+        // callee-saved register (`r15` on x86_64, `x21` on aarch64). Save it
+        // here and put it back on both exits below. The trap path matters
+        // most: the unwinder resumes the exceptional block with every
+        // register clobbered, and the guest chose the register's last value.
+        let psp_mode = self.tunables.ix_pinned_sp;
+        let psp_saved = if matches!(psp_mode, psp::mode::ON | psp::mode::REG_ONLY) {
+            Some(builder.ins().get_pinned_reg(pointer_type))
+        } else {
+            None
+        };
+        let psp_slot = match (psp_mode, ix_psp_slot) {
+            (psp::mode::REG_ONLY, Some(off)) => {
+                let region = alias_regions.public_global_region(builder.func);
+                let flags = ir::MemFlagsData::trusted().with_alias_region(Some(region));
+                let v = builder.ins().load(ir::types::I32, flags, vmctx, off);
+                let w = builder.ins().uextend(pointer_type, v);
+                builder.ins().set_pinned_reg(w);
+                Some((off, flags))
+            }
+            _ => None,
+        };
+
         // Create the invocation of wasm, which is notably done with a
         // `try_call` with an exception handler that's used to handle traps.
         let normal_return = builder.create_block();
@@ -1593,6 +1633,14 @@ impl Compiler {
         // On the normal return path store all the results in the array we were
         // provided and return "true" for "returned successfully".
         builder.switch_to_block(normal_return);
+        if let Some((off, flags)) = psp_slot {
+            let r = builder.ins().get_pinned_reg(pointer_type);
+            let v = builder.ins().ireduce(ir::types::I32, r);
+            builder.ins().store(flags, v, vmctx, off);
+        }
+        if let Some(saved) = psp_saved {
+            builder.ins().set_pinned_reg(saved);
+        }
         self.store_values_to_array(
             &mut alias_regions,
             &mut builder,
@@ -1608,6 +1656,9 @@ impl Compiler {
         // succeed". Note that register restoration is part of the `try_call`
         // and handler implementation.
         builder.switch_to_block(exceptional_return);
+        if let Some(saved) = psp_saved {
+            builder.ins().set_pinned_reg(saved);
+        }
         if cfg!(feature = "component-model") && self.tunables().concurrency_support {
             // NB: A trap unwinds over any fused adapter frames without running
             // their `exit-sync-call`s. That can leave

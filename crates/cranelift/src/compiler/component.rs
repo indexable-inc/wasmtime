@@ -1621,6 +1621,7 @@ impl ComponentCompiler for Compiler {
                     sig,
                     symbol,
                     wasmtime_environ::component::VMCOMPONENT_MAGIC,
+                    None,
                     |alias_regions, _pointer_type, cursor, vmctx| {
                         alias_regions
                             .vmcomponent()
@@ -1700,6 +1701,7 @@ impl ComponentCompiler for Compiler {
                     &wasm_func_ty,
                     symbol,
                     wasmtime_environ::component::VMCOMPONENT_MAGIC,
+                    None,
                     |alias_regions, _pointer_type, cursor, vmctx| {
                         alias_regions
                             .vmcomponent()

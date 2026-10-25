@@ -1,4 +1,5 @@
 mod gc;
+pub(crate) mod ix_pinned_sp;
 pub(crate) mod stack_switching;
 
 use crate::alias_region::{AliasRegions, GcAccess};
@@ -264,6 +265,9 @@ pub struct FuncEnvironment<'module_environment> {
 
     /// Cached alias regions for alias analysis.
     pub(crate) alias_regions: AliasRegions<VMOffsets<u8>>,
+
+    /// ix fork: `Tunables::ix_pinned_sp` state for this function.
+    ix_psp: Option<ix_pinned_sp::IxPsp>,
 }
 
 impl<'module_environment> FuncEnvironment<'module_environment> {
@@ -291,6 +295,7 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
 
         let isa = compiler.isa();
         let offsets = VMOffsets::new(isa.pointer_bytes(), &translation.module);
+        let ix_psp = ix_pinned_sp::IxPsp::new(translation, &offsets, key, tunables.ix_pinned_sp);
         Self {
             key,
             isa,
@@ -333,6 +338,8 @@ impl<'module_environment> FuncEnvironment<'module_environment> {
             func_body_offset,
 
             alias_regions: AliasRegions::new(offsets),
+
+            ix_psp,
         }
     }
 
@@ -3386,6 +3393,11 @@ impl FuncEnvironment<'_> {
                 }
             },
             None => {
+                if let Some(p) = self.ix_psp_for(global_index) {
+                    if let Some(v) = self.ix_psp_global_get(builder, p) {
+                        return Ok(v);
+                    }
+                }
                 let global_ty = self.module.globals[global_index];
                 let wasm_ty = global_ty.wasm_ty;
                 let (base, offset) = self.get_global_location(&mut builder.cursor(), global_index);
@@ -3475,7 +3487,13 @@ impl FuncEnvironment<'_> {
             let region = self.global_alias_region(builder.func, global_index);
             flags.set_alias_region(Some(region));
             debug_assert_eq!(ty, builder.func.dfg.value_type(val));
-            builder.ins().store(flags, val, base, offset);
+            let store = match self.ix_psp_for(global_index) {
+                Some(p) if initialized => self.ix_psp_global_set(builder, p, val),
+                _ => true,
+            };
+            if store {
+                builder.ins().store(flags, val, base, offset);
+            }
             self.update_global(builder, global_index, val);
         }
         Ok(())
@@ -5358,6 +5376,8 @@ impl FuncEnvironment<'_> {
         }
 
         self.update_state_slot_vmctx(builder);
+
+        self.ix_psp_function_entry(builder);
 
         // Additionally we initialize `fuel_var` if it will get used.
         if self.tunables.consume_fuel {

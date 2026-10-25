@@ -315,6 +315,7 @@ impl Metadata<'_> {
             inlining_sum_size_threshold,
             concurrency_support,
             recording,
+            ix_pinned_sp,
             asan_stack_switching,
 
             // This doesn't affect compilation, it's just a runtime setting.
@@ -388,6 +389,9 @@ impl Metadata<'_> {
             "guard before linear memory",
         )?;
         Self::check_bool(table_lazy_init, other.table_lazy_init, "table lazy init")?;
+        // ix fork: code compiled for one pinned-register mode relies on every
+        // other function and trampoline agreeing on who owns the register.
+        Self::check_int(ix_pinned_sp, other.ix_pinned_sp, "ix pinned stack pointer")?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,

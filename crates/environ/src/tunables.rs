@@ -208,6 +208,12 @@ define_tunables! {
         /// Whether `metadata.code.branch_hint` sections are parsed and used to
         /// mark cold blocks during compilation.
         pub branch_hinting: bool,
+
+        /// ix fork: keep the module's shadow stack pointer global in
+        /// Cranelift's pinned register while wasm runs. One of the
+        /// `ix_pinned_sp::mode` constants (0 = off, upstream behaviour). See
+        /// `Config::ix_pinned_sp` and the `ix_pinned_sp` module.
+        pub ix_pinned_sp: u8,
     }
 
     pub struct ConfigTunables {
@@ -297,6 +303,7 @@ impl Tunables {
             metadata_for_gc_heap_corruption: true,
             branch_hinting: false,
             debug_symbols: true,
+            ix_pinned_sp: 0,
         }
     }
 

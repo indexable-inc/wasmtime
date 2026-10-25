@@ -471,7 +471,13 @@ information about this check\
             // otherwise if they are enabled it could change the behavior of
             // generated code.
             "enable_llvm_abi_extensions" => *value == FlagValue::Bool(false),
-            "enable_pinned_reg" => *value == FlagValue::Bool(false),
+            // ix fork: on exactly when `Config::ix_pinned_sp` needs the register.
+            "enable_pinned_reg" => {
+                *value
+                    == FlagValue::Bool(wasmtime_environ::ix_pinned_sp::mode::uses_pinned_reg(
+                        self.tunables().ix_pinned_sp,
+                    ))
+            }
             "use_colocated_libcalls" => *value == FlagValue::Bool(false),
             "use_pinned_reg_as_heap_base" => *value == FlagValue::Bool(false),
 

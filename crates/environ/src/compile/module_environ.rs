@@ -258,6 +258,13 @@ pub struct ModuleTranslation<'data> {
     /// The WebAssembly `start` function, if defined.
     pub start_func: Option<FuncIndex>,
 
+    /// ix fork: the global the name section calls `__stack_pointer`, if any.
+    ix_sp_named: Option<GlobalIndex>,
+
+    /// ix fork: facts for `Tunables::ix_pinned_sp`, computed at the end of
+    /// translation when it is on and the module has a designated global.
+    pub ix_pinned_sp: Option<crate::ix_pinned_sp::IxPinnedSp>,
+
     /// Initializers for `global` values which aren't considered "simple".
     ///
     /// These initializers are later compiled into a "module startup" function.
@@ -344,6 +351,8 @@ impl<'data> ModuleTranslation<'data> {
             passive_elem_map: Default::default(),
             branch_hints: HashMap::default(),
             start_func: None,
+            ix_sp_named: None,
+            ix_pinned_sp: None,
             global_initializers: Vec::new(),
             passive_elements: Default::default(),
             table_initialization: Default::default(),
@@ -508,6 +517,8 @@ impl<'a, 'data> ModuleEnvironment<'a, 'data> {
                     .collect();
                 self.result.exported_signatures.sort_unstable();
                 self.result.exported_signatures.dedup();
+
+                self.ix_pinned_sp_finish();
             }
 
             Payload::TypeSection(types) => {
@@ -1125,6 +1136,32 @@ and for re-adding support for interface types you can see this issue:
         }
     }
 
+    /// ix fork: designate the pinned global and find the functions that may
+    /// tail-call out of the module (`Tunables::ix_pinned_sp`).
+    fn ix_pinned_sp_finish(&mut self) {
+        use crate::ix_pinned_sp::{self as psp, mode};
+        let m = self.tunables.ix_pinned_sp;
+        if !matches!(m, mode::ON | mode::REG_ONLY | mode::COUNT) {
+            return;
+        }
+        let module = &self.result.module;
+        let Some(global) = psp::designate(module, self.result.ix_sp_named) else {
+            return;
+        };
+        let tail_out = if m == mode::ON {
+            let scans: PrimaryMap<DefinedFuncIndex, psp::TailCalls> = self
+                .result
+                .function_body_inputs
+                .values()
+                .map(|input| psp::scan_tail_calls(module, &input.body))
+                .collect();
+            psp::tail_out_closure(&scans)
+        } else {
+            EntitySet::new()
+        };
+        self.result.ix_pinned_sp = Some(psp::IxPinnedSp { global, tail_out });
+    }
+
     fn flag_func_escaped(&mut self, func: FuncIndex) {
         let ty = &mut self.result.module.functions[func];
         // If this was already assigned a funcref index no need to re-assign it.
@@ -1192,10 +1229,20 @@ and for re-adding support for interface types you can see this issue:
                         }
                     }
                 }
+                wasmparser::Name::Global(names) => {
+                    for name in names {
+                        let Naming { index, name } = name?;
+                        if name == crate::ix_pinned_sp::STACK_POINTER_NAME
+                            && (index as usize) < self.result.module.globals.len()
+                            && self.result.ix_sp_named.is_none()
+                        {
+                            self.result.ix_sp_named = Some(GlobalIndex::from_u32(index));
+                        }
+                    }
+                }
                 wasmparser::Name::Label(_)
                 | wasmparser::Name::Type(_)
                 | wasmparser::Name::Table(_)
-                | wasmparser::Name::Global(_)
                 | wasmparser::Name::Memory(_)
                 | wasmparser::Name::Element(_)
                 | wasmparser::Name::Data(_)

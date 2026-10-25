@@ -516,6 +516,16 @@ pub use wasmtime_environ::ToWasmtimeResult;
 pub use wasmtime_environ::error;
 pub use wasmtime_environ::{FuncIndex, StaticModuleIndex};
 pub use wasmtime_environ::{IX_INTRINSIC_MODULE, IX_INTRINSICS_ABI, IxIntrinsic};
+
+/// ix fork, benchmarks only: executed `global.get` and `global.set` of
+/// designated stack-pointer globals, counted by code compiled with
+/// `Config::ix_unsafe_pinned_sp_bench(4)`. Returns `(gets, sets)` and resets
+/// both counters.
+pub fn ix_pinned_sp_take_counts() -> (u64, u64) {
+    use core::sync::atomic::Ordering::Relaxed;
+    let c = &wasmtime_environ::ix_pinned_sp::IX_PINNED_SP_COUNTS;
+    (c[0].swap(0, Relaxed), c[1].swap(0, Relaxed))
+}
 pub use wasmtime_environ::{OperatorCost, VariableOperatorCost};
 
 // Only for use in `bindgen!`-generated code.

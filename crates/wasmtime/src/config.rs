@@ -861,6 +861,65 @@ impl Config {
         self
     }
 
+    /// ix fork: keep the module's shadow stack pointer global in Cranelift's
+    /// pinned register (`r15` on x86_64, `x21` on aarch64) while wasm runs.
+    ///
+    /// Rust and other LLVM-compiled wasm keep their shadow stack pointer in a
+    /// mutable `i32` global (`__stack_pointer`), and every function with a
+    /// shadow frame loads it from the instance and stores it back. With this
+    /// option one designated global per module is cached in the pinned
+    /// register: `global.get` reads the register and `global.set` writes both
+    /// the register and the global's ordinary storage. The storage therefore
+    /// always holds the value wasm last wrote, so the host (`Global::get`),
+    /// other instances and code after a trap see exactly what they would see
+    /// without this option. The register is reloaded from storage wherever it
+    /// may be stale: on entry to every function reachable from outside the
+    /// module's direct calls, and after every call that may run host code or
+    /// another instance's code. Entry trampolines save and restore the
+    /// host's value of the register, including on traps.
+    ///
+    /// The designated global is the one the name section calls
+    /// `__stack_pointer` (if it is defined, mutable and `i32`), or, in a
+    /// module without that name, the first defined, mutable, `i32`, non-exported
+    /// global. The choice only affects speed.
+    ///
+    /// Every function compiled by the engine loses the pinned register for
+    /// allocation, whether or not its module has a designated global. The
+    /// setting is part of the compiled artifact's compatibility check.
+    ///
+    /// # Errors
+    ///
+    /// Building the engine fails unless the compiler is Cranelift and the
+    /// target is x86_64 or aarch64, or if stack switching or guest debugging
+    /// is enabled.
+    ///
+    /// By default this is off.
+    pub fn ix_pinned_sp(&mut self, enable: bool) -> &mut Self {
+        self.tunables.ix_pinned_sp = Some(if enable {
+            wasmtime_environ::ix_pinned_sp::mode::ON
+        } else {
+            wasmtime_environ::ix_pinned_sp::mode::OFF
+        });
+        self
+    }
+
+    /// ix fork, benchmarks only: select a raw `ix_pinned_sp` mode (see
+    /// `wasmtime_environ::ix_pinned_sp::mode`). 2 reserves the register
+    /// without using it, 3 keeps the global only in the register (the
+    /// ceiling), 4 counts executed accesses.
+    ///
+    /// # Safety
+    ///
+    /// Mode 3 is wrong for any module that imports functions, is re-entered,
+    /// traps, or shares the global with another instance: the global's storage
+    /// is stale while wasm runs and is lost on a trap. Mode 4 bakes a host
+    /// address into the code, so its artifacts must never be serialized and
+    /// loaded by another process.
+    pub unsafe fn ix_unsafe_pinned_sp_bench(&mut self, mode: u8) -> &mut Self {
+        self.tunables.ix_pinned_sp = Some(mode);
+        self
+    }
+
     /// Configures the size of the stacks used for asynchronous execution.
     ///
     /// This setting configures the size of the stacks that are allocated for
@@ -3047,6 +3106,36 @@ impl Config {
             compiler.clif_dir(path)?;
         }
 
+        {
+            use wasmtime_environ::ix_pinned_sp::mode;
+            let m = tunables.ix_pinned_sp;
+            if m > mode::COUNT {
+                bail!("unknown ix_pinned_sp mode {m}");
+            }
+            if m != mode::OFF {
+                if !matches!(self.compiler_config_mut().strategy, Some(Strategy::Cranelift)) {
+                    bail!("ix_pinned_sp requires the Cranelift compiler");
+                }
+                if !matches!(
+                    target.architecture,
+                    target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_)
+                ) {
+                    bail!("ix_pinned_sp is only supported on x86_64 and aarch64");
+                }
+                if features.contains(WasmFeatures::STACK_SWITCHING) {
+                    bail!("ix_pinned_sp is incompatible with stack switching");
+                }
+                if tunables.debug_guest {
+                    bail!("ix_pinned_sp is incompatible with guest debugging");
+                }
+            }
+            if mode::uses_pinned_reg(m) {
+                self.compiler_config_mut()
+                    .flags
+                    .insert("enable_pinned_reg".into(), UserSpecified::No);
+            }
+        }
+
         // If probestack is enabled for a target, Wasmtime will always use the
         // inline strategy which doesn't require us to define a `__probestack`
         // function or similar.
@@ -5158,6 +5247,11 @@ impl Engine {
     /// Returns the configured [`Config::debug_info`] value.
     pub fn get_debug_info(&self) -> bool {
         self.tunables().debug_native
+    }
+
+    /// Returns the configured [`Config::ix_pinned_sp`] mode (0 = off).
+    pub fn get_ix_pinned_sp(&self) -> u8 {
+        self.tunables().ix_pinned_sp
     }
 
     /// Returns the configured [`Config::guest_debug`] value.
