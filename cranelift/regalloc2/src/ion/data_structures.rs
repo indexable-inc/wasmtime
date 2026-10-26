@@ -510,6 +510,13 @@ impl<T> UnsafeSendSync<T> {
 }
 
 pub struct Ctx {
+    /// Work budget left (`RegallocOptions::fuel`; `u64::MAX` when
+    /// unbounded). Spent with `Env::burn`, checked with `Env::check_fuel`.
+    pub(crate) fuel: u64,
+    /// Words held by all `liveins` and `liveouts` sets, and the most they
+    /// may hold (`u64::MAX` when unbounded). See `Env::grow_live_words`.
+    pub(crate) live_words: u64,
+    pub(crate) max_live_words: u64,
     pub(crate) cfginfo: CFGInfo,
     pub(crate) cfginfo_ctx: CFGInfoCtx,
     pub(crate) liveins: Vec<IndexSet>,
@@ -600,6 +607,9 @@ impl Default for Ctx {
             scratch_bump: unsafe { UnsafeSendSync::new(Default::default()) },
             vregs: unsafe { UnsafeSendSync::new(Default::default()) },
 
+            fuel: u64::MAX,
+            live_words: 0,
+            max_live_words: u64::MAX,
             cfginfo: Default::default(),
             cfginfo_ctx: Default::default(),
             liveins: Default::default(),
@@ -977,6 +987,10 @@ pub struct Stats {
     pub blockparam_outs_count: usize,
     pub halfmoves_count: usize,
     pub edits_count: usize,
+    /// Work-budget units Ion spent (see `RegallocOptions::fuel`).
+    pub fuel_used: u64,
+    /// Most 64-bit words the liveness sets held at once.
+    pub live_words_peak: u64,
 }
 
 // Helper function for generating sorting keys. The order of arguments is from

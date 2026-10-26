@@ -19,8 +19,8 @@ use cranelift_codegen::isa::{
 };
 use cranelift_codegen::print_errors::pretty_error;
 use cranelift_codegen::{
-    CompiledCode, Context, MachBufferDebugTagList, MachBufferFrameLayout, MachCallSiteItem,
-    MachDebugTagPos,
+    CodegenError, CompiledCode, Context, MachBufferDebugTagList, MachBufferFrameLayout,
+    MachCallSiteItem, MachDebugTagPos,
 };
 use cranelift_entity::PrimaryMap;
 use cranelift_frontend::FunctionBuilder;
@@ -85,6 +85,10 @@ pub struct Compiler {
     // to ensure that this can be efficiently removed/added from this list.
     contexts: Mutex<Vec<Box<CompilerContext>>>,
     isa: OwnedTargetIsa,
+    /// ix fork: `isa` at `opt_level = none`, for one retry of a function
+    /// that hit an implementation limit (the regalloc budget); see
+    /// `FunctionCompiler::finish_with_info`.
+    retry_isa: Option<OwnedTargetIsa>,
     emit_debug_checks: bool,
     linkopts: LinkOptions,
     cache_store: Option<Arc<dyn CacheStore>>,
@@ -124,6 +128,7 @@ impl Compiler {
     pub fn new(
         tunables: Tunables,
         isa: OwnedTargetIsa,
+        retry_isa: Option<OwnedTargetIsa>,
         cache_store: Option<Arc<dyn CacheStore>>,
         emit_debug_checks: bool,
         linkopts: LinkOptions,
@@ -135,6 +140,7 @@ impl Compiler {
             contexts: Default::default(),
             tunables,
             isa,
+            retry_isa,
             emit_debug_checks,
             linkopts,
             cache_store,
@@ -1192,11 +1198,32 @@ impl cranelift_codegen::incremental_cache::CacheKvStore for CraneliftCacheStore 
     }
 }
 
+/// A failed compile of one function, and whether it failed on an
+/// implementation limit (`CodegenError::ImplLimitExceeded`, which is what
+/// the regalloc budget returns).
+struct FunctionCompileError {
+    error: CompileError,
+    limit: bool,
+}
+
+impl From<FunctionCompileError> for CompileError {
+    fn from(e: FunctionCompileError) -> CompileError {
+        e.error
+    }
+}
+
+fn function_compile_error(func: &ir::Function, inner: CodegenError) -> FunctionCompileError {
+    FunctionCompileError {
+        limit: matches!(inner, CodegenError::ImplLimitExceeded),
+        error: CompileError::Codegen(pretty_error(func, inner)),
+    }
+}
+
 fn compile_maybe_cached<'a>(
     context: &'a mut Context,
     isa: &dyn TargetIsa,
     cache_ctx: Option<&mut IncrementalCacheContext>,
-) -> Result<CompiledCode, CompileError> {
+) -> Result<CompiledCode, FunctionCompileError> {
     let cache_ctx = match cache_ctx {
         Some(ctx) => ctx,
         None => return compile_uncached(context, isa),
@@ -1205,7 +1232,7 @@ fn compile_maybe_cached<'a>(
     let mut cache_store = CraneliftCacheStore(cache_ctx.cache_store.clone());
     let (_compiled_code, from_cache) = context
         .compile_with_cache(isa, &mut cache_store, &mut Default::default())
-        .map_err(|error| CompileError::Codegen(pretty_error(&error.func, error.inner)))?;
+        .map_err(|error| function_compile_error(&error.func, error.inner))?;
 
     if from_cache {
         cache_ctx.num_hits += 1;
@@ -1219,10 +1246,10 @@ fn compile_maybe_cached<'a>(
 fn compile_uncached<'a>(
     context: &'a mut Context,
     isa: &dyn TargetIsa,
-) -> Result<CompiledCode, CompileError> {
+) -> Result<CompiledCode, FunctionCompileError> {
     context
         .compile(isa, &mut Default::default())
-        .map_err(|error| CompileError::Codegen(pretty_error(&error.func, error.inner)))?;
+        .map_err(|error| function_compile_error(&error.func, error.inner))?;
     Ok(context.take_compiled_code().unwrap())
 }
 
@@ -1755,15 +1782,42 @@ impl FunctionCompiler<'_> {
         symbol: &str,
     ) -> Result<CompiledFunction, CompileError> {
         let context = &mut self.cx.codegen_context;
-        let isa = &*self.compiler.isa;
+        let mut isa = &*self.compiler.isa;
+
+        // ix fork: keep the CLIF as it is before the optimizer runs, for a
+        // retry at `opt_level = none` (see `Compiler::retry_isa`).
+        let retry = self
+            .compiler
+            .retry_isa
+            .as_deref()
+            .map(|retry_isa| (retry_isa, context.func.clone()));
 
         // Run compilation, but don't propagate the error just yet. This'll
         // mutate `context` and the IR contained within (optionally) but it may
         // fail if the backend has a bug in it. Use `context` after this
         // finishes to optionally emit CLIF and then after that's done actually
         // propagate the error if one happened.
-        let compilation_result =
+        let mut compilation_result =
             compile_maybe_cached(context, isa, self.cx.incremental_cache_ctx.as_mut());
+
+        let hit_limit = matches!(
+            &compilation_result,
+            Err(FunctionCompileError { limit: true, .. })
+        );
+        if let (true, Some((retry_isa, func))) = (hit_limit, retry) {
+            log::warn!(
+                "`{symbol}` exceeded an implementation limit at opt_level {}; \
+                 compiling it again at opt_level none",
+                isa.flags().opt_level(),
+            );
+            let want_disasm = context.want_disasm;
+            context.clear();
+            context.func = func;
+            context.set_disasm(want_disasm);
+            isa = retry_isa;
+            compilation_result =
+                compile_maybe_cached(context, isa, self.cx.incremental_cache_ctx.as_mut());
+        }
 
         if let Some(path) = &self.compiler.clif_dir {
             use std::io::Write;

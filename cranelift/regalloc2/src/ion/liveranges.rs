@@ -12,6 +12,7 @@
 
 //! Live-range computation.
 
+use super::RANGE_WORDS;
 use super::{
     CodeRange, Env, LiveRangeFlag, LiveRangeIndex, LiveRangeKey, LiveRangeList, LiveRangeListEntry,
     LiveRangeSet, PRegData, PRegIndex, RegClass, Use, VRegData, VRegIndex,
@@ -197,6 +198,11 @@ impl<'a, F: Function> Env<'a, F> {
             // Is not contiguous with previously-added (immediately
             // following) range; create a new range.
             let lr = self.ctx.ranges.add(range, self.ctx.scratch_bump.clone());
+            // A range and its entry in the vreg's list hold about as much
+            // memory as `RANGE_WORDS` liveness-set words, and a value live in
+            // many blocks that are not adjacent in the layout gets one range
+            // per block, so ranges count against the same cap.
+            self.grow_live_words(0, RANGE_WORDS);
             self.ranges[lr].vreg = vreg;
             self.vregs[vreg]
                 .ranges
@@ -284,6 +290,8 @@ impl<'a, F: Function> Env<'a, F> {
         // liveouts.
         let mut workqueue = core::mem::take(&mut self.ctx.scratch_workqueue);
         let mut workqueue_set = core::mem::take(&mut self.ctx.scratch_workqueue_set);
+        // A run that ran out of fuel can leave blocks of another function here.
+        workqueue.clear();
         workqueue_set.clear();
         // Initialize workqueue with postorder traversal.
         for &block in &self.cfginfo.postorder[..] {
@@ -301,11 +309,17 @@ impl<'a, F: Function> Env<'a, F> {
 
             let mut live = self.liveouts[block.index()].clone();
             trace!(" -> initial liveout set: {:?}", live);
+            // The clone, the scan and the unions below cost the set's size.
+            // Many values live across many blocks make these sets
+            // blocks x values in total, the dominant time and memory here.
+            self.burn(1 + live.words() + insns.len());
 
             // Include outgoing blockparams in the initial live set.
             if self.func.is_branch(insns.last()) {
                 for i in 0..self.func.block_succs(block).len() {
-                    for &param in self.func.branch_blockparams(block, insns.last(), i) {
+                    let params = self.func.branch_blockparams(block, insns.last(), i);
+                    self.burn(1 + params.len());
+                    for &param in params {
                         live.set(param.vreg(), true);
                         self.observe_vreg_class(param);
                     }
@@ -313,6 +327,8 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             for inst in insns.iter().rev() {
+                // Both passes below scan every operand.
+                self.burn(2 * self.func.inst_operands(inst).len());
                 for pos in &[OperandPos::Late, OperandPos::Early] {
                     for op in self.func.inst_operands(inst) {
                         if op.as_fixed_nonallocatable().is_some() {
@@ -340,7 +356,20 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             for &pred in self.func.block_preds(block) {
-                if self.ctx.liveouts[pred.index()].union_with(&live) {
+                self.burn(live.words());
+                let before = self.ctx.liveouts[pred.index()].words();
+                let changed = self.ctx.liveouts[pred.index()].union_with(&live);
+                let after = self.ctx.liveouts[pred.index()].words();
+                self.grow_live_words(before, after);
+                // Check after every union, not once per block: a join with
+                // P preds would otherwise add P x |live| words past the cap
+                // before the check below sees them.
+                if let Err(e) = self.check_fuel() {
+                    self.ctx.scratch_workqueue = workqueue;
+                    self.ctx.scratch_workqueue_set = workqueue_set;
+                    return Err(e);
+                }
+                if changed {
                     if !workqueue_set.contains(&pred) {
                         workqueue_set.insert(pred);
                         workqueue.push_back(pred);
@@ -349,7 +378,14 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             trace!("computed liveins at block{}: {:?}", block.index(), live);
+            let (before, after) = (self.liveins[block.index()].words(), live.words());
+            self.grow_live_words(before, after);
             self.liveins[block.index()] = live;
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_workqueue = workqueue;
+                self.ctx.scratch_workqueue_set = workqueue_set;
+                return Err(e);
+            }
         }
 
         // Check that there are no liveins to the entry block.
@@ -383,6 +419,7 @@ impl<'a, F: Function> Env<'a, F> {
         let mut vreg_ranges = core::mem::take(&mut self.ctx.scratch_vreg_ranges);
         vreg_ranges.repopulate(self.func.num_vregs(), LiveRangeIndex::invalid());
         let mut operand_rewrites = core::mem::take(&mut self.ctx.scratch_operand_rewrites);
+        operand_rewrites.clear();
 
         for i in (0..self.func.num_blocks()).rev() {
             let block = Block::new(i);
@@ -392,6 +429,14 @@ impl<'a, F: Function> Env<'a, F> {
 
             // Init our local live-in set.
             let mut live = self.liveouts[block.index()].clone();
+            // The clone and the scan below cost the set's words; each live
+            // value then creates or extends a range (charged in that loop).
+            self.burn(1 + 2 * live.words() + insns.len());
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_vreg_ranges = vreg_ranges;
+                self.ctx.scratch_operand_rewrites = operand_rewrites;
+                return Err(e);
+            }
 
             // If the last instruction is a branch (rather than
             // return), create blockparam_out entries.
@@ -418,7 +463,11 @@ impl<'a, F: Function> Env<'a, F> {
             }
 
             // Initially, registers are assumed live for the whole block.
+            // One unit per live value: a set word holds up to 64 of them, so
+            // charging per word would undercount this loop and the ranges it
+            // creates by up to 64x.
             for vreg in live.iter() {
+                self.burn(1);
                 let range = CodeRange {
                     from: self.cfginfo.block_entry[block.index()],
                     to: self.cfginfo.block_exit[block.index()].next(),

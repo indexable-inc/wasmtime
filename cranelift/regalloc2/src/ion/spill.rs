@@ -16,14 +16,18 @@ use super::{
     AllocRegResult, Env, LiveRangeKey, PRegIndex, RegTraversalIter, SpillSetIndex, SpillSlotData,
     SpillSlotIndex,
 };
-use crate::{Allocation, Function, SpillSlot};
+use crate::{Allocation, Function, RegAllocError, SpillSlot};
 
 impl<'a, F: Function> Env<'a, F> {
-    pub fn try_allocating_regs_for_spilled_bundles(&mut self) {
+    pub fn try_allocating_regs_for_spilled_bundles(&mut self) -> Result<(), RegAllocError> {
         trace!("allocating regs for spilled bundles");
         let mut scratch = core::mem::take(&mut self.ctx.scratch_conflicts);
         for i in 0..self.ctx.spilled_bundles.len() {
             let bundle = self.ctx.spilled_bundles[i]; // don't borrow self
+            if let Err(e) = self.check_fuel() {
+                self.ctx.scratch_conflicts = scratch;
+                return Err(e);
+            }
 
             if self.ctx.bundles[bundle].ranges.is_empty() {
                 continue;
@@ -46,8 +50,15 @@ impl<'a, F: Function> Env<'a, F> {
             for preg in RegTraversalIter::new(self.env, class, None, hint, bundle.index(), limit) {
                 trace!("trying bundle {:?} to preg {:?}", bundle, preg);
                 let preg_idx = PRegIndex::new(preg.index());
+                // Only `Allocated` matters here, so stop at the first
+                // conflict instead of collecting every conflicting bundle.
+                // The full scan made this loop O(spilled bundles x
+                // conflicts per preg): with tens of thousands of values
+                // live across a call it was quadratic (49k loop-carried
+                // locals: 47 s). `Some(0)` as the cost limit would miss
+                // conflicts with zero-weight bundles, so this asks for any.
                 if let AllocRegResult::Allocated(_) =
-                    self.try_to_allocate_bundle_to_reg(bundle, preg_idx, None, &mut scratch)
+                    self.try_to_allocate_bundle_to_reg::<true>(bundle, preg_idx, None, &mut scratch)
                 {
                     self.ctx.output.stats.spill_bundle_reg_success += 1;
                     success = true;
@@ -65,6 +76,7 @@ impl<'a, F: Function> Env<'a, F> {
             }
         }
         self.ctx.scratch_conflicts = scratch;
+        Ok(())
     }
 
     pub fn spillslot_can_fit_spillset(

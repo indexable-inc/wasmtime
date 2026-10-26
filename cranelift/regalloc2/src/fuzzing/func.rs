@@ -44,6 +44,14 @@ impl InstData {
             clobbers: vec![],
         }
     }
+    /// An ordinary instruction with these operands and clobbers.
+    pub fn op(operands: Vec<Operand>, clobbers: Vec<PReg>) -> InstData {
+        InstData {
+            op: InstOpcode::Op,
+            operands,
+            clobbers,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -391,6 +399,75 @@ impl Options {
         num_callsite_ish_vregs_per_inst: 0..=20,
         num_clobbers_per_inst: 0..=10,
     };
+}
+
+impl Func {
+    /// `n` if/else diamonds in a row, each defining one value that stays live
+    /// to the end, where a chain of adds uses them all: the shape of the wasm
+    /// `ifelse` compile-time DoS case once the egraph has sunk its running sum
+    /// to the return (wasm-host bench/results/2026-10-25-compile-dos). About
+    /// `4n` blocks with up to `n` values live across each, so Ion's liveness
+    /// sets and its move insertion are `O(n^2)` on it. The left arm of each
+    /// diamond clobbers eight registers, like a call.
+    ///
+    /// `stride` spaces the long-lived vregs' numbers apart: at 1 they pack 64
+    /// to a liveness-set word, at 64 each takes a word of its own.
+    pub fn diamonds(n: usize, stride: usize) -> Func {
+        assert!(n >= 1 && stride >= 1);
+        let int = |i: usize| VReg::new(i, RegClass::Int);
+        let def = |v: VReg| {
+            Operand::new(
+                v,
+                OperandConstraint::Reg,
+                OperandKind::Def,
+                OperandPos::Late,
+            )
+        };
+        let use_ = |v: VReg| {
+            Operand::new(
+                v,
+                OperandConstraint::Reg,
+                OperandKind::Use,
+                OperandPos::Early,
+            )
+        };
+        let clobbers: Vec<PReg> = (0..8).map(|i| PReg::new(i, RegClass::Int)).collect();
+
+        let mut b = FuncBuilder::new();
+        let mut head = b.add_block();
+        for i in 0..n {
+            let (left, right, join) = (b.add_block(), b.add_block(), b.add_block());
+            b.add_inst(head, InstData::op(vec![def(int(i * stride))], vec![]));
+            b.add_inst(head, InstData::branch());
+            b.add_edge(head, left);
+            b.add_edge(head, right);
+            b.set_block_params_out(head, vec![vec![], vec![]]);
+            b.add_inst(left, InstData::op(vec![], clobbers.clone()));
+            for arm in [left, right] {
+                b.add_inst(arm, InstData::branch());
+                b.add_edge(arm, join);
+                b.set_block_params_out(arm, vec![vec![]]);
+            }
+            head = join;
+        }
+        // The exit is the last join: acc_0 = d_0, acc_k = acc_{k-1} + d_k.
+        let acc = |k: usize| int(n * stride + k);
+        b.add_inst(head, InstData::op(vec![def(acc(0)), use_(int(0))], vec![]));
+        for k in 1..n {
+            b.add_inst(
+                head,
+                InstData::op(
+                    vec![def(acc(k)), use_(acc(k - 1)), use_(int(k * stride))],
+                    vec![],
+                ),
+            );
+        }
+        let mut ret = InstData::ret();
+        ret.operands.push(use_(acc(n - 1)));
+        b.add_inst(head, ret);
+        b.f.num_vregs = n * stride + n;
+        b.finalize()
+    }
 }
 
 impl Arbitrary<'_> for Func {

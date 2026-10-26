@@ -6,11 +6,34 @@ use crate::ir::Function;
 use crate::ir::pcc;
 use crate::isa::TargetIsa;
 use crate::machinst::*;
-use crate::settings::RegallocAlgorithm;
+use crate::settings::{RegallocAlgorithm, RegallocBudget};
 use crate::timing;
 use crate::trace;
 
-use regalloc2::{Algorithm, RegallocOptions};
+use regalloc2::{Algorithm, Function as _, RegAllocError, RegallocOptions};
+
+/// Work budget of the backtracking allocator per unit of function size (an
+/// instruction, block or virtual register), see the `regalloc_budget`
+/// setting and `RegallocOptions::fuel`.
+///
+/// Calibration (2026-10-25, x86-64 and aarch64, opt_level speed and none):
+/// over the 49 474 functions of four real modules (Turso 13 MB, Kusama
+/// runtime 8.8 MB, SpiderMonkey 7.4 MB, a Go 1.26 wasip1 build) the most
+/// fuel any function used was 55 per unit (p99 22, median 3), and the most
+/// liveness words (set words plus `ion::RANGE_WORDS` per live range) 7.1
+/// per unit against the cap of 16 (`ion::FUEL_PER_LIVE_WORD`). Binaryen
+/// asyncify output is the exception: in SpiderMonkey and Kusama asyncified,
+/// 4 of 24 899 functions need up to 953 fuel and 115 words per unit (651
+/// and 85 at opt_level none), so under `reject` those modules fail and need
+/// `fallback`. At the cap, the whole compile peaks at about 600 bytes of RSS
+/// per unit on the hostile cases in wasm-host
+/// bench/results/2026-10-25-compile-dos (100k `br_if`s to one label with
+/// 64k live values: 1.48M units, rejected in 2.5 s at 841 MB; base: over
+/// 150 s and 13.6 GB).
+pub const REGALLOC_FUEL_PER_UNIT: u64 = 256;
+
+/// Budget floor, so small functions never hit it.
+pub const REGALLOC_FUEL_MIN: u64 = 1 << 24;
 
 /// Compile the given function down to VCode with allocated registers, ready
 /// for binary emission.
@@ -70,7 +93,58 @@ pub fn compile<B: LowerBackend + TargetIsa>(
             RegallocAlgorithm::SinglePass => Algorithm::Fastalloc,
         };
 
-        regalloc2::run_with_ctx(&vcode, vcode.abi.machine_env(), &options, regalloc_ctx)
+        let budget = b.flags().regalloc_budget();
+        if budget != RegallocBudget::Unbounded {
+            let units = (vcode.num_insts() + vcode.num_blocks() + vcode.num_vregs()) as u64;
+            options.fuel = Some(
+                units
+                    .saturating_mul(REGALLOC_FUEL_PER_UNIT)
+                    .max(REGALLOC_FUEL_MIN),
+            );
+        }
+
+        let mut result =
+            regalloc2::run_with_ctx(&vcode, vcode.abi.machine_env(), &options, regalloc_ctx)
+                .map(|_| ());
+        if let Err(RegAllocError::OutOfFuel) = result {
+            log::warn!(
+                "register allocation of {} exceeded its budget ({} units for {} insts, {} blocks, {} vregs): {:?}",
+                f.name,
+                options.fuel.unwrap_or(0),
+                vcode.num_insts(),
+                vcode.num_blocks(),
+                vcode.num_vregs(),
+                budget,
+            );
+            match budget {
+                RegallocBudget::Reject => return Err(CodegenError::ImplLimitExceeded),
+                RegallocBudget::Fallback => {
+                    options.algorithm = Algorithm::Fastalloc;
+                    options.fuel = None;
+                    result = regalloc2::run_with_ctx(
+                        &vcode,
+                        vcode.abi.machine_env(),
+                        &options,
+                        regalloc_ctx,
+                    )
+                    .map(|_| ());
+                }
+                RegallocBudget::Unbounded => unreachable!("no budget was set"),
+            }
+        } else if let Some(fuel) = options.fuel {
+            log::debug!(
+                "regalloc budget: used {} of {} units, live words peak {}, ranges {} ({} insts, {} blocks, {} vregs)",
+                regalloc_ctx.output.stats.fuel_used,
+                fuel,
+                regalloc_ctx.output.stats.live_words_peak,
+                regalloc_ctx.output.stats.final_liverange_count,
+                vcode.num_insts(),
+                vcode.num_blocks(),
+                vcode.num_vregs(),
+            );
+        }
+
+        result
             .map_err(|err| {
                 log::error!(
                     "Register allocation error for vcode\n\

@@ -7,6 +7,7 @@ use crate::isa_builder::IsaBuilder;
 use cranelift_codegen::{
     CodegenResult,
     isa::{self, OwnedTargetIsa},
+    settings::{OptLevel, RegallocBudget},
 };
 use std::fmt;
 use std::path;
@@ -127,12 +128,26 @@ impl CompilerBuilder for Builder {
 
     fn build(&self) -> Result<Box<dyn wasmtime_environ::Compiler>> {
         let isa = self.inner.build()?;
+        // ix fork: with `regalloc_budget = reject`, a function over the
+        // budget (or another implementation limit) is compiled once more at
+        // `opt_level = none` before the module fails. The budget stays on
+        // for that retry. Most of the hostile shapes come from the egraph
+        // sinking pure chains to their uses, which `none` does not do.
+        let flags = isa.flags();
+        let retry_isa = if flags.regalloc_budget() == RegallocBudget::Reject
+            && flags.opt_level() != OptLevel::None
+        {
+            Some(self.inner.build_with("opt_level", "none")??)
+        } else {
+            None
+        };
         Ok(Box::new(crate::compiler::Compiler::new(
             self.tunables
                 .as_ref()
                 .expect("set_tunables not called")
                 .clone(),
             isa,
+            retry_isa,
             self.cache_store.clone(),
             self.emit_debug_checks,
             self.linkopts.clone(),

@@ -26,7 +26,7 @@ use crate::ion::reg_traversal::RegTraversalIter;
 use crate::moves::{MoveAndScratchResolver, ParallelMoves};
 use crate::{
     Allocation, Block, Edit, Function, FxHashMap, Inst, InstPosition, OperandConstraint,
-    OperandKind, OperandPos, PReg, ProgPoint, RegClass, SpillSlot,
+    OperandKind, OperandPos, PReg, ProgPoint, RegAllocError, RegClass, SpillSlot,
 };
 use alloc::format;
 use alloc::vec::Vec;
@@ -73,7 +73,7 @@ impl<'a, F: Function> Env<'a, F> {
         }
     }
 
-    pub fn apply_allocations_and_insert_moves(&mut self) -> InsertedMoves {
+    pub fn apply_allocations_and_insert_moves(&mut self) -> Result<InsertedMoves, RegAllocError> {
         trace!("apply_allocations_and_insert_moves");
         trace!("blockparam_ins: {:?}", self.blockparam_ins);
         trace!("blockparam_outs: {:?}", self.blockparam_outs);
@@ -282,6 +282,9 @@ impl<'a, F: Function> Env<'a, F> {
             if !self.is_vreg_used(vreg) {
                 continue;
             }
+            // The block scans below cost the blocks each range covers: a
+            // value live across many blocks, times many such values.
+            self.check_fuel()?;
 
             inter_block_sources.clear();
 
@@ -386,6 +389,7 @@ impl<'a, F: Function> Env<'a, F> {
                         break;
                     }
                     trace!("examining block with end in range: block{}", block.index());
+                    self.burn(1);
 
                     match inter_block_sources.entry(block) {
                         // If the entry is already present in the map, we'll try to prefer a
@@ -475,6 +479,7 @@ impl<'a, F: Function> Env<'a, F> {
                     if self.cfginfo.block_entry[block.index()] >= range.to {
                         break;
                     }
+                    self.burn(1);
 
                     // Add half-moves for blockparam inputs.
                     trace!(
@@ -772,7 +777,7 @@ impl<'a, F: Function> Env<'a, F> {
         // invariant to the client.
         self.output.debug_locations.sort_unstable();
 
-        inserted_moves
+        Ok(inserted_moves)
     }
 
     pub fn resolve_inserted_moves(&mut self, mut inserted_moves: InsertedMoves) -> Edits {

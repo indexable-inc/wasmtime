@@ -10,8 +10,9 @@
 use crate::Variable;
 use alloc::{vec, vec::Vec};
 use core::mem;
+use cranelift_codegen::FxHashMap;
 use cranelift_codegen::cursor::{Cursor, FuncCursor};
-use cranelift_codegen::entity::{EntityList, EntitySet, ListPool, SecondaryMap};
+use cranelift_codegen::entity::{EntityList, EntityRef, EntitySet, ListPool, SecondaryMap};
 use cranelift_codegen::ir::immediates::{Ieee16, Ieee32, Ieee64, Ieee128};
 use cranelift_codegen::ir::types::{F16, F32, F64, F128, I64, I128};
 use cranelift_codegen::ir::{Block, Function, Inst, InstBuilder, Type, Value};
@@ -32,10 +33,21 @@ use cranelift_codegen::packed_option::PackedOption;
 /// can be declared.
 #[derive(Default)]
 pub struct SSABuilder {
-    // TODO: Consider a sparse representation rather than SecondaryMap-of-SecondaryMap.
     /// Records for every variable and for every relevant block, the last definition of
-    /// the variable in the block.
-    variables: SecondaryMap<Variable, SecondaryMap<Block, PackedOption<Value>>>,
+    /// the variable in the block, keyed by [`var_block_key`].
+    ///
+    /// This is sparse on purpose. A dense map per variable over blocks costs
+    /// `variables x blocks` memory: each variable's map grows to the index of the
+    /// last block that defines it. Wasm input of a few hundred KB (many locals each
+    /// set once after many blocks, or many `if (result ..)` blocks, each of which
+    /// gets fresh variables) made that tens of GB. The map holds one entry per
+    /// definition the builder records, so it is linear in the work done.
+    variables: FxHashMap<u64, Value>,
+
+    /// Variables with at least one entry in `variables`, so the check in
+    /// `mark_var_needs_stack_map` costs O(1) instead of a scan of the map.
+    #[cfg(debug_assertions)]
+    defined_vars: EntitySet<Variable>,
 
     /// Variables whose bindings must be tracked for stack maps.
     stack_map_vars: EntitySet<Variable>,
@@ -116,6 +128,8 @@ impl SSABuilder {
     /// deallocating memory.
     pub fn clear(&mut self) {
         self.variables.clear();
+        #[cfg(debug_assertions)]
+        self.defined_vars.clear();
         self.stack_map_vars.clear();
         self.stack_map_values.clear();
         self.ssa_blocks.clear();
@@ -136,6 +150,23 @@ impl SSABuilder {
             && self.results.is_empty()
             && self.side_effects.is_empty()
     }
+}
+
+impl SSABuilder {
+    /// Record `val` as the definition of `var` in `block`, returning the one
+    /// it replaces.
+    #[inline]
+    fn set_def(&mut self, var: Variable, block: Block, val: Value) -> Option<Value> {
+        #[cfg(debug_assertions)]
+        self.defined_vars.insert(var);
+        self.variables.insert(var_block_key(var, block), val)
+    }
+}
+
+/// The key of `(var, block)` in [`SSABuilder::variables`].
+#[inline]
+fn var_block_key(var: Variable, block: Block) -> u64 {
+    ((var.index() as u64) << 32) | block.index() as u64
 }
 
 /// States for the `use_var`/`predecessors_lookup` state machine.
@@ -215,14 +246,15 @@ impl SSABuilder {
     /// The SSA value is passed as an argument because it should be created with
     /// `ir::DataFlowGraph::append_result`.
     pub fn def_var(&mut self, var: Variable, val: Value, block: Block) {
-        self.variables[var][block] = PackedOption::from(val);
+        self.set_def(var, block, val);
         self.record_stack_map_binding(var, val);
     }
 
     /// Mark `var` as needing its bindings tracked for stack maps.
     pub fn mark_var_needs_stack_map(&mut self, var: Variable) {
-        debug_assert!(
-            self.variables[var].values().all(|v| v.is_none()),
+        #[cfg(debug_assertions)]
+        assert!(
+            !self.defined_vars.contains(var),
             "declare_var_needs_stack_map({var:?}) must be called before any \
              definition of the variable; otherwise earlier definitions are \
              silently omitted from stack maps"
@@ -280,7 +312,7 @@ impl SSABuilder {
     fn use_var_nonlocal(&mut self, func: &mut Function, var: Variable, ty: Type, mut block: Block) {
         // First, try Local Value Numbering (Algorithm 1 in the paper).
         // If the variable already has a known Value in this block, use that.
-        if let Some(val) = self.variables[var][block].expand() {
+        if let Some(&val) = self.variables.get(&var_block_key(var, block)) {
             self.results.push(val);
             return;
         }
@@ -309,10 +341,9 @@ impl SSABuilder {
         //
         // So in either case there is no definition in these blocks yet and we can blindly set one.
         debug_assert!(!self.stack_map_vars.contains(var) || self.stack_map_values.contains(val));
-        let var_defs = &mut self.variables[var];
         while block != from {
-            debug_assert!(var_defs[block].is_none());
-            var_defs[block] = PackedOption::from(val);
+            let prev = self.set_def(var, block, val);
+            debug_assert!(prev.is_none());
             block = self.ssa_blocks[block].single_predecessor.unwrap();
         }
     }
@@ -349,13 +380,12 @@ impl SSABuilder {
     ) -> (Value, Block) {
         // Try to find an existing definition along single-predecessor edges first.
         self.visited.clear();
-        let var_defs = &mut self.variables[var];
         while let Some(pred) = self.ssa_blocks[block].single_predecessor.expand() {
             if !self.visited.insert(block) {
                 break;
             }
             block = pred;
-            if let Some(val) = var_defs[block].expand() {
+            if let Some(&val) = self.variables.get(&var_block_key(var, block)) {
                 self.results.push(val);
                 return (val, block);
             }
@@ -364,7 +394,7 @@ impl SSABuilder {
         // We've promised to return the most recent block where `var` was defined, but we didn't
         // find a usable definition. So create one.
         let val = func.dfg.append_block_param(block, ty);
-        var_defs[block] = PackedOption::from(val);
+        self.set_def(var, block, val);
         self.record_stack_map_binding(var, val);
 
         // Now every predecessor needs to pass its definition of this variable to the newly added
@@ -845,6 +875,117 @@ mod tests {
             }
             _ => assert!(false),
         };
+    }
+
+    /// Many variables and many blocks: the `widevars` compile-time DoS shape
+    /// (a long run of blocks, then many locals each set once), with diamonds
+    /// on the way that redefine one variable. The definition map must stay
+    /// linear in what the builder records; the old dense per-variable block
+    /// map held about variables x blocks entries here (12M), and 7.9 GB for
+    /// 49k locals after 32k blocks. Lookups through single-predecessor
+    /// chains and across joins must still find the right values.
+    #[test]
+    fn sparse_map_many_vars_many_blocks() {
+        const DIAMONDS: usize = 1000;
+        const VARS: usize = 4000;
+        use alloc::vec::Vec;
+        let mut func = Function::new();
+        let mut ssa = SSABuilder::default();
+        let x_var = Variable::new(0);
+
+        let entry = func.dfg.make_block();
+        FuncCursor::new(&mut func).insert_block(entry);
+        ssa.declare_block(entry);
+        ssa.seal_block(entry, &mut func);
+        let x0 = FuncCursor::new(&mut func)
+            .at_bottom(entry)
+            .ins()
+            .iconst(I32, 0);
+        ssa.def_var(x_var, x0, entry);
+
+        let mut head = entry;
+        let mut x_head = x0;
+        for i in 0..DIAMONDS {
+            let (left, right, join) = (
+                func.dfg.make_block(),
+                func.dfg.make_block(),
+                func.dfg.make_block(),
+            );
+            {
+                let mut cur = FuncCursor::new(&mut func);
+                cur.insert_block(left);
+                cur.insert_block(right);
+                cur.insert_block(join);
+            }
+            let c = ssa.use_var(&mut func, x_var, I32, head).0;
+            assert_eq!(c, x_head);
+            let br =
+                FuncCursor::new(&mut func)
+                    .at_bottom(head)
+                    .ins()
+                    .brif(c, left, &[], right, &[]);
+
+            // The left arm redefines x, the right arm does not.
+            ssa.declare_block(left);
+            ssa.declare_block_predecessor(left, br);
+            ssa.seal_block(left, &mut func);
+            let x_left = FuncCursor::new(&mut func)
+                .at_bottom(left)
+                .ins()
+                .iconst(I32, i as i64 + 1);
+            ssa.def_var(x_var, x_left, left);
+            let jump_left = FuncCursor::new(&mut func)
+                .at_bottom(left)
+                .ins()
+                .jump(join, &[]);
+
+            ssa.declare_block(right);
+            ssa.declare_block_predecessor(right, br);
+            ssa.seal_block(right, &mut func);
+            assert_eq!(ssa.use_var(&mut func, x_var, I32, right).0, x_head);
+            let jump_right = FuncCursor::new(&mut func)
+                .at_bottom(right)
+                .ins()
+                .jump(join, &[]);
+
+            // Two definitions reach the join, so x becomes its parameter.
+            ssa.declare_block(join);
+            ssa.declare_block_predecessor(join, jump_left);
+            ssa.declare_block_predecessor(join, jump_right);
+            ssa.seal_block(join, &mut func);
+            let x_join = ssa.use_var(&mut func, x_var, I32, join).0;
+            assert_eq!(func.dfg.block_params(join), &[x_join]);
+            head = join;
+            x_head = x_join;
+        }
+
+        // Many variables, each set once in the last block.
+        let mut defs = Vec::with_capacity(VARS);
+        for v in 1..=VARS {
+            let val = FuncCursor::new(&mut func)
+                .at_bottom(head)
+                .ins()
+                .iconst(I64, v as i64);
+            ssa.def_var(Variable::new(v), val, head);
+            defs.push(val);
+        }
+        for (v, &val) in (1..=VARS).zip(&defs) {
+            assert_eq!(ssa.use_var(&mut func, Variable::new(v), I64, head).0, val);
+        }
+        assert_eq!(ssa.use_var(&mut func, x_var, I32, head).0, x_head);
+        FuncCursor::new(&mut func)
+            .at_bottom(head)
+            .ins()
+            .return_(&[]);
+
+        let blocks = 1 + 3 * DIAMONDS;
+        let entries = ssa.variables.len();
+        assert!(
+            entries <= VARS + 1 + 4 * DIAMONDS,
+            "{entries} definition entries for {VARS} variables and {blocks} blocks"
+        );
+        let flags = settings::Flags::new(settings::builder());
+        verify_function(&func, &flags).expect("valid function");
     }
 
     #[test]
