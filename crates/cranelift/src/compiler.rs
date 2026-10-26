@@ -243,12 +243,18 @@ impl Compiler {
             vm_store_context,
         );
 
+        // ix fork: with the ix-aot ABI a multi-result function takes a
+        // trailing results pointer instead of returning values.
+        let ix_results_ptr = crate::ix_results_ptr(wasm_func_ty, &self.tunables);
+        let wasm_args_end = 2 + wasm_func_ty.params().len();
+        let results_ptr = ix_results_ptr.then(|| args[wasm_args_end]);
+
         // Spill all wasm arguments to the stack in `ValRaw` slots.
         let (args_base, args_len) = self.allocate_stack_array_and_spill_args(
             &mut alias_regions,
             wasm_func_ty,
             &mut builder,
-            &args[2..],
+            &args[2..wasm_args_end],
         );
         let args_len = builder.ins().iconst(pointer_type, i64::from(args_len));
 
@@ -305,7 +311,19 @@ impl Compiler {
             args_base,
             args_len,
         );
-        builder.ins().return_(&results);
+        if let Some(results_ptr) = results_ptr {
+            self.store_values_to_array(
+                &mut alias_regions,
+                &mut builder,
+                wasm_func_ty.results(),
+                &results,
+                results_ptr,
+                args_len,
+            );
+            builder.ins().return_(&[]);
+        } else {
+            builder.ins().return_(&results);
+        }
         builder.finalize(self.isa().frontend_config());
         crate::alias_region::debug_assert_all_mem_insts_have_alias_regions(
             &compiler.cx.codegen_context.func,
@@ -494,6 +512,11 @@ impl wasmtime_environ::Compiler for Compiler {
         symbol: &str,
     ) -> Result<CompiledFunctionBody, CompileError> {
         log::trace!("compiling Wasm function: {key:?} = {symbol:?}");
+        if self.tunables.ix_aot_callable {
+            return Err(CompileError::Codegen(
+                "ix_aot: wasm functions are compiled by ix-aot, not Cranelift".into(),
+            ));
+        }
 
         let isa = &*self.isa;
         let module = &translation.module;
@@ -706,7 +729,145 @@ impl wasmtime_environ::Compiler for Compiler {
         funcs: &[(String, FuncKey, Box<dyn Any + Send + Sync>)],
         resolve_reloc: &dyn Fn(usize, FuncKey) -> usize,
     ) -> Result<Vec<(Option<SymbolId>, FunctionLoc)>> {
-        log::trace!(
+        let funcs = funcs
+            .iter()
+            .map(|(sym, key, func)| (sym.as_str(), *key, &**func))
+            .collect::<Vec<_>>();
+        self.append_code_refs_impl(obj, &funcs, resolve_reloc)
+    }
+
+    fn append_code_refs(
+        &self,
+        obj: &mut Object<'static>,
+        funcs: &[(&str, FuncKey, &(dyn Any + Send + Sync))],
+        resolve_reloc: &dyn Fn(usize, FuncKey) -> usize,
+    ) -> Result<Vec<(Option<SymbolId>, FunctionLoc)>> {
+        self.append_code_refs_impl(obj, funcs, resolve_reloc)
+    }
+
+    fn triple(&self) -> &target_lexicon::Triple {
+        self.isa.triple()
+    }
+
+    fn flags(&self) -> Vec<(&'static str, FlagValue<'static>)> {
+        crate::clif_flags_to_wasmtime(self.isa.flags().iter())
+    }
+
+    fn isa_flags(&self) -> Vec<(&'static str, FlagValue<'static>)> {
+        crate::clif_flags_to_wasmtime(self.isa.isa_flags())
+    }
+
+    fn is_branch_protection_enabled(&self) -> bool {
+        self.isa.is_branch_protection_enabled()
+    }
+
+    fn component_compiler(&self) -> &dyn wasmtime_environ::component::ComponentCompiler {
+        self
+    }
+
+    fn append_dwarf<'a>(
+        &self,
+        obj: &mut Object<'_>,
+        translations: &'a PrimaryMap<StaticModuleIndex, ModuleTranslation<'a>>,
+        get_func: &'a dyn Fn(
+            StaticModuleIndex,
+            DefinedFuncIndex,
+        ) -> (Option<SymbolId>, &'a (dyn Any + Send + Sync)),
+        dwarf_package_bytes: Option<&'a [u8]>,
+        tunables: &'a Tunables,
+    ) -> Result<()> {
+        log::trace!("appending DWARF debug info");
+
+        let get_func = move |m, f| {
+            let (sym, any) = get_func(m, f);
+            log::trace!("get_func({m:?}, {f:?}) -> ({sym:?}, {any:#p})");
+            debug_assert!(!any.is::<Option<Box<CompilerContext>>>());
+            debug_assert!(any.is::<CompiledFunction>());
+            (
+                sym,
+                any.downcast_ref::<CompiledFunction>().unwrap().metadata(),
+            )
+        };
+
+        let mut compilation = crate::debug::Compilation::new(
+            &*self.isa,
+            translations,
+            &get_func,
+            dwarf_package_bytes,
+            tunables,
+        );
+        let dwarf_sections = crate::debug::emit_dwarf(&*self.isa, &mut compilation)
+            .with_context(|| "failed to emit DWARF debug information")?;
+
+        let (debug_bodies, debug_relocs): (Vec<_>, Vec<_>) = dwarf_sections
+            .iter()
+            .map(|s| ((s.name, &s.body), (s.name, &s.relocs)))
+            .unzip();
+        let mut dwarf_sections_ids = HashMap::new();
+        for (name, body) in debug_bodies {
+            let segment = obj.segment_name(StandardSegment::Debug).to_vec();
+            let section_id = obj.add_section(segment, name.as_bytes().to_vec(), SectionKind::Debug);
+            dwarf_sections_ids.insert(name, section_id);
+            obj.append_section_data(section_id, &body, 1);
+        }
+
+        // Write all debug data relocations.
+        for (name, relocs) in debug_relocs {
+            let section_id = *dwarf_sections_ids.get(name).unwrap();
+            for reloc in relocs {
+                let target_symbol = match reloc.target {
+                    DwarfSectionRelocTarget::Func(id) => compilation.symbol_id(id).unwrap(),
+                    DwarfSectionRelocTarget::Section(name) => {
+                        obj.section_symbol(dwarf_sections_ids[name])
+                    }
+                };
+                obj.add_relocation(
+                    section_id,
+                    object::write::Relocation {
+                        offset: u64::from(reloc.offset),
+                        symbol: target_symbol,
+                        addend: i64::from(reloc.addend),
+                        flags: RelocationFlags::Generic {
+                            size: reloc.size << 3,
+                            kind: RelocationKind::Absolute,
+                            encoding: RelocationEncoding::Generic,
+                        },
+                    },
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn create_systemv_cie(&self) -> Option<gimli::write::CommonInformationEntry> {
+        self.isa.create_systemv_cie()
+    }
+
+    fn compiled_function_relocation_targets<'a>(
+        &'a self,
+        func: &'a dyn Any,
+    ) -> Box<dyn Iterator<Item = FuncKey> + 'a> {
+        debug_assert!(!func.is::<Option<Box<CompilerContext>>>());
+        debug_assert!(func.is::<CompiledFunction>());
+        let func = func.downcast_ref::<CompiledFunction>().unwrap();
+        Box::new(func.relocations().map(|r| r.reloc_target))
+    }
+
+    fn release_caches(&self) {
+        *self.contexts.lock().unwrap() = Vec::new();
+    }
+}
+
+impl Compiler {
+    /// `append_code` over borrowed functions (ix fork: ix-aot appends its own
+    /// code blobs next to the Cranelift trampolines it holds by reference).
+    fn append_code_refs_impl(
+        &self,
+        obj: &mut Object<'static>,
+        funcs: &[(&str, FuncKey, &(dyn Any + Send + Sync))],
+        resolve_reloc: &dyn Fn(usize, FuncKey) -> usize,
+    ) -> Result<Vec<(Option<SymbolId>, FunctionLoc)>> {        log::trace!(
             "appending functions to object file: {:#?}",
             funcs.iter().map(|(sym, _, _)| sym).collect::<Vec<_>>()
         );
@@ -724,11 +885,11 @@ impl wasmtime_environ::Compiler for Compiler {
 
         let funcs = funcs
             .iter()
-            .map(|(sym, key, func)| {
+            .map(|&(sym, key, func)| {
                 debug_assert!(!func.is::<Option<Box<CompilerContext>>>());
                 debug_assert!(func.is::<CompiledFunction>());
                 let func = func.downcast_ref::<CompiledFunction>().unwrap();
-                (sym, *key, func)
+                (sym, key, func)
             })
             .collect::<Vec<_>>();
 
@@ -860,119 +1021,6 @@ impl wasmtime_environ::Compiler for Compiler {
         }
 
         Ok(ret)
-    }
-
-    fn triple(&self) -> &target_lexicon::Triple {
-        self.isa.triple()
-    }
-
-    fn flags(&self) -> Vec<(&'static str, FlagValue<'static>)> {
-        crate::clif_flags_to_wasmtime(self.isa.flags().iter())
-    }
-
-    fn isa_flags(&self) -> Vec<(&'static str, FlagValue<'static>)> {
-        crate::clif_flags_to_wasmtime(self.isa.isa_flags())
-    }
-
-    fn is_branch_protection_enabled(&self) -> bool {
-        self.isa.is_branch_protection_enabled()
-    }
-
-    fn component_compiler(&self) -> &dyn wasmtime_environ::component::ComponentCompiler {
-        self
-    }
-
-    fn append_dwarf<'a>(
-        &self,
-        obj: &mut Object<'_>,
-        translations: &'a PrimaryMap<StaticModuleIndex, ModuleTranslation<'a>>,
-        get_func: &'a dyn Fn(
-            StaticModuleIndex,
-            DefinedFuncIndex,
-        ) -> (Option<SymbolId>, &'a (dyn Any + Send + Sync)),
-        dwarf_package_bytes: Option<&'a [u8]>,
-        tunables: &'a Tunables,
-    ) -> Result<()> {
-        log::trace!("appending DWARF debug info");
-
-        let get_func = move |m, f| {
-            let (sym, any) = get_func(m, f);
-            log::trace!("get_func({m:?}, {f:?}) -> ({sym:?}, {any:#p})");
-            debug_assert!(!any.is::<Option<Box<CompilerContext>>>());
-            debug_assert!(any.is::<CompiledFunction>());
-            (
-                sym,
-                any.downcast_ref::<CompiledFunction>().unwrap().metadata(),
-            )
-        };
-
-        let mut compilation = crate::debug::Compilation::new(
-            &*self.isa,
-            translations,
-            &get_func,
-            dwarf_package_bytes,
-            tunables,
-        );
-        let dwarf_sections = crate::debug::emit_dwarf(&*self.isa, &mut compilation)
-            .with_context(|| "failed to emit DWARF debug information")?;
-
-        let (debug_bodies, debug_relocs): (Vec<_>, Vec<_>) = dwarf_sections
-            .iter()
-            .map(|s| ((s.name, &s.body), (s.name, &s.relocs)))
-            .unzip();
-        let mut dwarf_sections_ids = HashMap::new();
-        for (name, body) in debug_bodies {
-            let segment = obj.segment_name(StandardSegment::Debug).to_vec();
-            let section_id = obj.add_section(segment, name.as_bytes().to_vec(), SectionKind::Debug);
-            dwarf_sections_ids.insert(name, section_id);
-            obj.append_section_data(section_id, &body, 1);
-        }
-
-        // Write all debug data relocations.
-        for (name, relocs) in debug_relocs {
-            let section_id = *dwarf_sections_ids.get(name).unwrap();
-            for reloc in relocs {
-                let target_symbol = match reloc.target {
-                    DwarfSectionRelocTarget::Func(id) => compilation.symbol_id(id).unwrap(),
-                    DwarfSectionRelocTarget::Section(name) => {
-                        obj.section_symbol(dwarf_sections_ids[name])
-                    }
-                };
-                obj.add_relocation(
-                    section_id,
-                    object::write::Relocation {
-                        offset: u64::from(reloc.offset),
-                        symbol: target_symbol,
-                        addend: i64::from(reloc.addend),
-                        flags: RelocationFlags::Generic {
-                            size: reloc.size << 3,
-                            kind: RelocationKind::Absolute,
-                            encoding: RelocationEncoding::Generic,
-                        },
-                    },
-                )?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn create_systemv_cie(&self) -> Option<gimli::write::CommonInformationEntry> {
-        self.isa.create_systemv_cie()
-    }
-
-    fn compiled_function_relocation_targets<'a>(
-        &'a self,
-        func: &'a dyn Any,
-    ) -> Box<dyn Iterator<Item = FuncKey> + 'a> {
-        debug_assert!(!func.is::<Option<Box<CompilerContext>>>());
-        debug_assert!(func.is::<CompiledFunction>());
-        let func = func.downcast_ref::<CompiledFunction>().unwrap();
-        Box::new(func.relocations().map(|r| r.reloc_target))
-    }
-
-    fn release_caches(&self) {
-        *self.contexts.lock().unwrap() = Vec::new();
     }
 }
 
@@ -1539,6 +1587,12 @@ impl Compiler {
         );
         args.insert(0, caller_vmctx);
         args.insert(0, vmctx);
+        // ix fork: the ix-aot ABI writes multiple results straight into the
+        // values array, which has the same 16-byte `ValRaw` slots.
+        let ix_results_ptr = crate::ix_results_ptr(callee_sig, &self.tunables);
+        if ix_results_ptr {
+            args.push(values_vec_ptr);
+        }
 
         // Just before we enter Wasm, save our context information.
         //
@@ -1620,14 +1674,16 @@ impl Compiler {
         // On the normal return path store all the results in the array we were
         // provided and return "true" for "returned successfully".
         builder.switch_to_block(normal_return);
-        self.store_values_to_array(
-            &mut alias_regions,
-            &mut builder,
-            callee_sig.results(),
-            &normal_return_values,
-            values_vec_ptr,
-            values_vec_len,
-        );
+        if !ix_results_ptr {
+            self.store_values_to_array(
+                &mut alias_regions,
+                &mut builder,
+                callee_sig.results(),
+                &normal_return_values,
+                values_vec_ptr,
+                values_vec_len,
+            );
+        }
         let true_return = builder.ins().iconst(ir::types::I8, 1);
         builder.ins().return_(&[true_return]);
 

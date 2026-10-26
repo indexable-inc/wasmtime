@@ -267,6 +267,14 @@ define_tunables! {
         /// trampoline of every module in an engine must agree, so this is part
         /// of the artifact check. See `Config::ix_wasm_cc`.
         pub ix_wasm_cc: IxWasmCc,
+
+        /// ix fork: wasm functions come from ix-aot (LLVM), not Cranelift.
+        /// Their entry points use the target's C calling convention (SysV on
+        /// x86_64, AAPCS64 on aarch64) with an explicit results pointer as
+        /// the last parameter when a function has more than one result, and
+        /// the Cranelift trampolines call and are called with that
+        /// convention. Part of the artifact check. See `Config::ix_aot`.
+        pub ix_aot_callable: bool,
     }
 
     pub struct ConfigTunables {
@@ -364,6 +372,7 @@ impl Tunables {
             ix_unsafe_ci_nocheck: 0,
             ix_static_call_indirect: false,
             ix_wasm_cc: IxWasmCc::Standard,
+            ix_aot_callable: false,
         }
     }
 

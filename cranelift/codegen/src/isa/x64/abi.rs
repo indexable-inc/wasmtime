@@ -908,6 +908,10 @@ impl ABIMachineSpec for X64ABIMachineSpec {
             // Wasmtime).
             (isa::CallConv::PreserveAll, true) => ALL_CLOBBERS,
             (isa::CallConv::Winch, _) => ALL_CLOBBERS,
+            // ix fork: Wasmtime unwinds a trap to the `try_call` handler
+            // without restoring callee-saved registers, so a SystemV callee
+            // (ix-aot wasm code) must be treated like `Tail` on that edge.
+            (isa::CallConv::SystemV, true) => ALL_CLOBBERS,
             (isa::CallConv::SystemV, _) => SYSV_CLOBBERS,
             (isa::CallConv::WindowsFastcall, false) => WINDOWS_CLOBBERS,
             (isa::CallConv::PreserveAll, _) => NO_CLOBBERS,

@@ -94,6 +94,42 @@ impl CompiledFunction {
         this
     }
 
+    /// ix fork: a function compiled outside Cranelift (ix-aot). `relocs`
+    /// are `(offset, kind, target, addend)` calls to other functions of the
+    /// module, trampolines or builtins; `traps` are `(offset, trap)`.
+    pub fn from_ix_parts(
+        code: &[u8],
+        alignment: u32,
+        relocs: &[(u32, cranelift_codegen::binemit::Reloc, wasmtime_environ::FuncKey, i64)],
+        traps: &[(u32, wasmtime_environ::Trap)],
+    ) -> Self {
+        let mut name_map = PrimaryMap::new();
+        let mut refs = std::collections::HashMap::new();
+        let relocs = relocs
+            .iter()
+            .map(|&(offset, kind, key, addend)| {
+                let r = *refs.entry(key).or_insert_with(|| {
+                    let (namespace, index) = key.into_raw_parts();
+                    name_map.push(ir::UserExternalName { namespace, index })
+                });
+                cranelift_codegen::MachReloc {
+                    offset,
+                    kind,
+                    target: cranelift_codegen::RelocTarget::ExternalName(ir::ExternalName::User(
+                        r,
+                    )),
+                    addend,
+                }
+            })
+            .collect::<Vec<_>>();
+        let traps = traps.iter().map(|&(offset, trap)| cranelift_codegen::MachTrap {
+            offset,
+            code: crate::env_trap_to_clif(trap),
+        });
+        let buffer = MachBufferFinalized::from_raw_parts(code, traps, relocs, alignment);
+        Self::new(buffer, name_map, alignment)
+    }
+
     /// Finalize breakpoint patches: edit the buffer to have NOPs by
     /// default, and place patch data in the debug breakpoint data
     /// tables.

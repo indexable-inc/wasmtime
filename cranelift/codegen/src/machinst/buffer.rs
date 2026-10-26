@@ -440,6 +440,38 @@ pub struct MachBufferInner {
     pub min_alignment: u32,
 }
 
+impl MachBufferFinalized {
+    /// ix fork: wraps machine code produced outside Cranelift (ix-aot, an
+    /// LLVM tier) so the Wasmtime object writer can place it like any other
+    /// function. Only code, traps, external relocations and alignment are
+    /// carried; there are no call sites, stack maps, unwind or frame data.
+    pub fn from_raw_parts(
+        data: &[u8],
+        traps: impl IntoIterator<Item = MachTrap>,
+        relocs: impl IntoIterator<Item = MachReloc>,
+        min_alignment: u32,
+    ) -> MachBufferFinalized {
+        MachBufferFinalized {
+            inner: Box::new(MachBufferInner {
+                data: SmallVec::from_slice(data),
+                traps: traps.into_iter().collect(),
+                relocs: relocs.into_iter().collect(),
+                exception_handlers: SmallVec::new(),
+                call_sites: SmallVec::new(),
+                patchable_call_sites: SmallVec::new(),
+                debug_tags: Vec::new(),
+                debug_tag_pool: Vec::new(),
+                user_stack_maps: SmallVec::new(),
+                unwind_info: SmallVec::new(),
+                frame_layout: None,
+                srclocs: SmallVec::new(),
+                min_alignment,
+            }),
+            nop_units: Vec::new(),
+        }
+    }
+}
+
 impl<I: VCodeInst> Deref for MachBuffer<I> {
     type Target = MachBufferInner;
     fn deref(&self) -> &Self::Target {

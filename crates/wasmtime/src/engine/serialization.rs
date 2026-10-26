@@ -377,6 +377,7 @@ impl Metadata<'_> {
             ix_unsafe_ci_nocheck,
             ix_static_call_indirect,
             ix_wasm_cc,
+            ix_aot_callable,
 
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
@@ -476,6 +477,11 @@ impl Metadata<'_> {
         // `VMFuncRef::wasm_call`, so every module in an engine must use the same
         // wasm-to-wasm argument registers.
         Self::check_int(ix_wasm_cc, other.ix_wasm_cc, "ix wasm calling convention")?;
+        Self::check_bool(
+            ix_aot_callable,
+            other.ix_aot_callable,
+            "ix-aot calling convention",
+        )?;
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,

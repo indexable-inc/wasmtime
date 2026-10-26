@@ -219,9 +219,20 @@ fn wasm_call_conv(isa: &dyn TargetIsa, tunables: &Tunables) -> CallConv {
             "The Winch calling convention is only implemented for x86_64 and aarch64"
         );
         CallConv::Winch
+    } else if tunables.ix_aot_callable {
+        // ix fork: wasm functions are compiled by ix-aot (LLVM) with the C
+        // calling convention.
+        CallConv::triple_default(isa.triple())
     } else {
         CallConv::Tail
     }
+}
+
+/// ix fork: whether a wasm function of this type returns its results through
+/// a trailing results pointer (ix-aot ABI, more than one result). The pointer
+/// addresses one 16-byte `ValRaw` slot per result.
+fn ix_results_ptr(wasm_func_ty: &WasmFuncType, tunables: &Tunables) -> bool {
+    tunables.ix_aot_callable && wasm_func_ty.results().len() > 1
 }
 
 /// Get the internal Wasm calling convention signature for the given type.
@@ -234,7 +245,11 @@ fn wasm_call_signature(
     let mut sig = blank_sig(isa, call_conv);
     let cvt = |ty: &WasmValType| ir::AbiParam::new(value_type(isa, *ty));
     sig.params.extend(wasm_func_ty.params().iter().map(&cvt));
-    sig.returns.extend(wasm_func_ty.results().iter().map(&cvt));
+    if ix_results_ptr(wasm_func_ty, tunables) {
+        sig.params.push(ir::AbiParam::new(isa.pointer_type()));
+    } else {
+        sig.returns.extend(wasm_func_ty.results().iter().map(&cvt));
+    }
     sig
 }
 
@@ -318,6 +333,19 @@ fn clif_trap_to_env_trap(trap: ir::TrapCode, tunables: &Tunables) -> Option<Comp
 
         other => Trap::from_u8(other.as_raw().get() - TRAP_OFFSET).unwrap(),
     }))
+}
+
+/// ix fork: the Cranelift trap code whose metadata decodes back to `trap`
+/// (the inverse of `clif_trap_to_env_trap`).
+pub fn env_trap_to_clif(trap: Trap) -> ir::TrapCode {
+    match trap {
+        Trap::StackOverflow => ir::TrapCode::STACK_OVERFLOW,
+        Trap::MemoryOutOfBounds => ir::TrapCode::HEAP_OUT_OF_BOUNDS,
+        Trap::IntegerOverflow => ir::TrapCode::INTEGER_OVERFLOW,
+        Trap::IntegerDivisionByZero => ir::TrapCode::INTEGER_DIVISION_BY_ZERO,
+        Trap::BadConversionToInteger => ir::TrapCode::BAD_CONVERSION_TO_INTEGER,
+        other => ir::TrapCode::unwrap_user(other as u8 + TRAP_OFFSET),
+    }
 }
 
 /// Converts machine relocations to relocation information

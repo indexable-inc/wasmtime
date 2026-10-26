@@ -268,6 +268,28 @@ struct CompilerConfig {
     cache_store: Option<Arc<dyn CacheStore>>,
     clif_dir: Option<std::path::PathBuf>,
     wmemcheck: bool,
+    ix_compiler: Option<IxCompilerFactory>,
+}
+
+#[cfg(any(feature = "cranelift", feature = "winch"))]
+/// ix fork: builds the compiler used in place of Cranelift's own builder
+/// (see [`Config::ix_compiler`]). It is given the target triple (`None` for
+/// the host).
+pub type IxCompilerFn = dyn Fn(
+        Option<target_lexicon::Triple>,
+    ) -> Result<Box<dyn wasmtime_environ::CompilerBuilder>>
+    + Send
+    + Sync;
+
+#[cfg(any(feature = "cranelift", feature = "winch"))]
+#[derive(Clone)]
+struct IxCompilerFactory(Arc<IxCompilerFn>);
+
+#[cfg(any(feature = "cranelift", feature = "winch"))]
+impl fmt::Debug for IxCompilerFactory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("IxCompilerFactory")
+    }
 }
 
 #[cfg(any(feature = "cranelift", feature = "winch"))]
@@ -288,6 +310,7 @@ impl CompilerConfig {
             cache_store: None,
             clif_dir: None,
             wmemcheck: false,
+            ix_compiler: None,
         }
     }
 
@@ -1070,6 +1093,44 @@ impl Config {
     /// The default is [`IxWasmCc::Standard`].
     pub fn ix_wasm_cc(&mut self, cc: IxWasmCc) -> &mut Self {
         self.tunables.ix_wasm_cc = Some(cc);
+        self
+    }
+
+    /// ix fork: wasm functions are compiled by ix-aot (an LLVM tier) and
+    /// called with the target's C calling convention (SysV on x86_64, AAPCS64
+    /// on aarch64); a function with more than one result takes a trailing
+    /// pointer to one 16-byte slot per result. The Cranelift trampolines
+    /// follow the same convention.
+    ///
+    /// An engine that only loads ix-aot artifacts sets this and keeps the
+    /// Cranelift compiler; an engine that compiles them also sets
+    /// [`Config::ix_compiler`]. Cranelift itself cannot compile wasm
+    /// functions under this setting. Part of the artifact check.
+    ///
+    /// # Errors
+    ///
+    /// Building the engine fails unless [`Config::ix_wasm_cc`] is
+    /// [`IxWasmCc::Standard`] and the target is x86_64 or aarch64.
+    pub fn ix_aot(&mut self, enable: bool) -> &mut Self {
+        self.tunables.ix_aot_callable = Some(enable);
+        self
+    }
+
+    /// ix fork: compile with the builder `factory` returns instead of
+    /// Cranelift's (the strategy stays [`Strategy::Cranelift`], and every
+    /// Cranelift setting and flag is forwarded to the returned builder). Used
+    /// by ix-aot with [`Config::ix_aot`].
+    #[cfg(any(feature = "cranelift", feature = "winch"))]
+    pub fn ix_compiler(
+        &mut self,
+        factory: impl Fn(
+            Option<target_lexicon::Triple>,
+        ) -> Result<Box<dyn wasmtime_environ::CompilerBuilder>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> &mut Self {
+        self.compiler_config_mut().ix_compiler = Some(IxCompilerFactory(Arc::new(factory)));
         self
     }
 
@@ -3306,7 +3367,22 @@ impl Config {
                 Some(target.clone())
             };
 
+        let ix_compiler = self.compiler_config_mut().ix_compiler.clone();
+        if tunables.ix_aot_callable {
+            if tunables.ix_wasm_cc != IxWasmCc::Standard {
+                bail!("ix_aot requires ix_wasm_cc Standard");
+            }
+            if !matches!(
+                target.architecture,
+                target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_)
+            ) {
+                bail!("ix_aot is only supported on x86_64 and aarch64");
+            }
+        }
         let mut compiler = match self.compiler_config_mut().strategy {
+            Some(Strategy::Cranelift) if ix_compiler.is_some() => {
+                (ix_compiler.unwrap().0)(target_for_builder)?
+            }
             #[cfg(feature = "cranelift")]
             Some(Strategy::Cranelift) => wasmtime_cranelift::builder(target_for_builder)?,
             #[cfg(not(feature = "cranelift"))]

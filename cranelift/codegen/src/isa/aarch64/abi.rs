@@ -1229,6 +1229,9 @@ impl ABIMachineSpec for AArch64MachineDeps {
             // register restores" for this ABI (so as to work with
             // Wasmtime).
             (isa::CallConv::PreserveAll, true) => ALL_CLOBBERS,
+            // ix fork: see the x64 note; ix-aot wasm code is AAPCS and a
+            // trap unwinds to the handler with no callee-saved restore.
+            (isa::CallConv::SystemV, true) => ALL_CLOBBERS,
             (isa::CallConv::SystemV, _) => DEFAULT_AAPCS_CLOBBERS,
             // On Mach-O, the compact unwind info properly describes how are callee-save
             // registers restored during unwinding.

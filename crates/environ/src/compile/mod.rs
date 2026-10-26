@@ -314,6 +314,18 @@ pub trait Compiler: Send + Sync {
         resolve_reloc: &dyn Fn(usize, FuncKey) -> usize,
     ) -> Result<Vec<(Option<SymbolId>, FunctionLoc)>>;
 
+    /// ix fork: [`Compiler::append_code`] over borrowed functions, so another
+    /// compiler (ix-aot) can append its own code next to functions this one
+    /// compiled. Only Cranelift implements it.
+    fn append_code_refs(
+        &self,
+        _obj: &mut Object<'static>,
+        _funcs: &[(&str, FuncKey, &(dyn Any + Send + Sync))],
+        _resolve_reloc: &dyn Fn(usize, FuncKey) -> usize,
+    ) -> Result<Vec<(Option<SymbolId>, FunctionLoc)>> {
+        bail!("append_code_refs is not supported by this compiler")
+    }
+
     /// Creates a new `Object` file which is used to build the results of a
     /// compilation into.
     ///
