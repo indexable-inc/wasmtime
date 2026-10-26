@@ -12,6 +12,11 @@ pub const IX_AOT_PRODUCTION: u8 = 0;
 pub const IX_AOT_INSTRUMENTED: u8 = 1;
 /// ix fork: [`Tunables::ix_aot_artifact`] of a `--pgo-fuzz` artifact.
 pub const IX_AOT_PGO_FUZZ: u8 = 2;
+/// ix fork: flag ORed into [`Tunables::ix_aot_artifact`] by an ix-aot built
+/// with measurement features (`ab-switches`, `unsafe-bench`), whose knobs
+/// can turn off stack or poll checks. Such an artifact is never production:
+/// only an engine that sets the same flag loads it.
+pub const IX_AOT_UNSAFE: u8 = 0x80;
 
 macro_rules! define_tunables {
     (
@@ -289,7 +294,8 @@ define_tunables! {
         /// code stores PGO counters to a fixed address outside the sandbox,
         /// so only a training host that maps the counters may load it. 2
         /// ([`IX_AOT_PGO_FUZZ`]): compiled with a random profile, for tests.
-        /// See `Config::ix_aot_artifact`.
+        /// Any of them with [`IX_AOT_UNSAFE`] set: built by a measurement
+        /// ix-aot. See `Config::ix_aot_artifact`.
         pub ix_aot_artifact: u8,
 
         /// ix fork: the ix-aot options fingerprint (sha256 of every option

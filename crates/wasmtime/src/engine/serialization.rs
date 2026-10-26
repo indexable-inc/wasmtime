@@ -336,11 +336,18 @@ impl Metadata<'_> {
         if found == expected {
             return Ok(());
         }
-        let name = |k: u8| match k {
-            wasmtime_environ::IX_AOT_PRODUCTION => "a production",
-            wasmtime_environ::IX_AOT_INSTRUMENTED => "a PGO-instrumented (training-only)",
-            wasmtime_environ::IX_AOT_PGO_FUZZ => "a random-profile (test-only)",
-            _ => "an unknown",
+        let name = |k: u8| {
+            let base = match k & !wasmtime_environ::IX_AOT_UNSAFE {
+                wasmtime_environ::IX_AOT_PRODUCTION => "a production",
+                wasmtime_environ::IX_AOT_INSTRUMENTED => "a PGO-instrumented (training-only)",
+                wasmtime_environ::IX_AOT_PGO_FUZZ => "a random-profile (test-only)",
+                _ => "an unknown",
+            };
+            if k & wasmtime_environ::IX_AOT_UNSAFE != 0 {
+                format!("{base}, unsafe measurement-build (ab-switches/unsafe-bench)")
+            } else {
+                base.to_string()
+            }
         };
         bail!(
             "Module is {} ix-aot artifact but this engine loads {} one",
@@ -785,6 +792,22 @@ mod test {
         m.tunables.ix_aot_artifact = wasmtime_environ::IX_AOT_INSTRUMENTED;
         let e = m.check_compatible(&engine).unwrap_err();
         assert_contains(&e, "PGO-instrumented");
+        // A measurement-build artifact on an ordinary engine, and on one
+        // that sets the flag.
+        let mut m = Metadata::new(&engine)?;
+        m.tunables.ix_aot_artifact = wasmtime_environ::IX_AOT_UNSAFE;
+        let e = m.check_compatible(&engine).unwrap_err();
+        assert_contains(&e, "unsafe measurement-build");
+        let mut cfg = Config::new();
+        cfg.ix_aot_artifact(wasmtime_environ::IX_AOT_UNSAFE);
+        let unsafe_engine = Engine::new(&cfg)?;
+        let mut m = Metadata::new(&unsafe_engine)?;
+        m.tunables.ix_aot_artifact = wasmtime_environ::IX_AOT_UNSAFE;
+        m.check_compatible(&unsafe_engine)?;
+        let mut m = Metadata::new(&unsafe_engine)?;
+        m.tunables.ix_aot_artifact = wasmtime_environ::IX_AOT_PRODUCTION;
+        let e = m.check_compatible(&unsafe_engine).unwrap_err();
+        assert_contains(&e, "this engine loads a production, unsafe");
         // Any fingerprint passes an engine that expects none.
         let mut m = Metadata::new(&engine)?;
         m.tunables.ix_aot_fingerprint = [7; 32];
