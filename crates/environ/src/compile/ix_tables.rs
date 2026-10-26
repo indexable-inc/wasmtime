@@ -324,8 +324,10 @@ impl ModuleTranslation<'_> {
     ///
     /// The runtime fills each row once per module (see `IxDispatchPlan`);
     /// the compiler lowers calls through a row with no bounds, null or
-    /// signature check on the hot path. Linear in the element segments and
-    /// the call sites (plus log factors).
+    /// signature check on the hot path. Linear in the element segments, the
+    /// call sites and the arity of the distinct types (plus log factors):
+    /// each distinct element type and each call type gets one shape key, and
+    /// a row's length is one map lookup, never a scan of the element types.
     pub(crate) fn ix_compute_dispatch(&mut self, types: &crate::ModuleTypesBuilder) {
         const MAX_ENTRIES: u64 = 1 << 20;
         const ENTRIES_PER_ELEMENT: u64 = 32;
@@ -366,15 +368,16 @@ impl ModuleTranslation<'_> {
         }
         let mut cands = Vec::new();
         let mut nonnull: u64 = 0;
-        // Per table: (count, last index) of each element type, or None when
-        // some element is not a defined function.
-        let mut stats: Option<(TableIndex, Option<BTreeMap<ModuleInternedTypeIndex, (u64, u64)>>)> =
+        // Per table: the last index of each element function-type shape
+        // (`ix_func_shape_key`) and of any element whose type has no shape
+        // key, or None when some element is not a defined function.
+        let mut stats: Option<(TableIndex, Option<(BTreeMap<Vec<u8>, u64>, Option<u64>)>)> =
             None;
         for (&(table, ty), &sites) in wanted.iter() {
             if stats.as_ref().map(|s| s.0) != Some(table) {
                 let def = module.defined_table_index(table).unwrap();
                 let st = self.ix_static_tables[def.index()].as_ref().unwrap();
-                let mut by_ty = BTreeMap::new();
+                let mut by_ty: BTreeMap<ModuleInternedTypeIndex, u64> = BTreeMap::new();
                 let mut ok = true;
                 let mut n = 0;
                 for (i, f) in st.funcs.iter().enumerate() {
@@ -387,16 +390,27 @@ impl ModuleTranslation<'_> {
                     }
                     n += 1;
                     let fty = module.functions[*f].signature.unwrap_module_type_index();
-                    let e = by_ty.entry(fty).or_insert((0u64, 0u64));
-                    e.0 += 1;
-                    e.1 = i as u64;
+                    by_ty.insert(fty, i as u64);
                 }
                 if ok {
                     nonnull += n;
                 }
-                stats = Some((table, ok.then_some(by_ty)));
+                // One shape key per distinct element type, so this is linear
+                // in the element types (times their arity) plus log factors.
+                let mut by_shape: BTreeMap<Vec<u8>, u64> = BTreeMap::new();
+                let mut wild: Option<u64> = None;
+                for (&fty, &last) in &by_ty {
+                    match ix_func_shape_key(types, fty) {
+                        Some(k) => {
+                            let e = by_shape.entry(k).or_insert(0);
+                            *e = (*e).max(last);
+                        }
+                        None => wild = wild.max(Some(last)),
+                    }
+                }
+                stats = Some((table, ok.then_some((by_shape, wild))));
             }
-            let Some((_, Some(by_ty))) = &stats else {
+            let Some((_, Some((by_shape, wild)))) = &stats else {
                 continue;
             };
             // The row must reach every element whose engine type may equal
@@ -406,11 +420,11 @@ impl ModuleTranslation<'_> {
             // and the runtime fills (and the compiler treats a zero entry as
             // a mismatch) by engine type. Shapes that differ can never be
             // equal; the rest are included and the runtime fill decides.
-            let last = by_ty
-                .iter()
-                .filter(|(fty, _)| ix_func_shape_may_equal(types, **fty, ty))
-                .map(|(_, &(_, last))| last)
-                .max();
+            let last = match ix_func_shape_key(types, ty) {
+                Some(k) => by_shape.get(&k).copied().max(*wild),
+                // No key for the call's type: every element may match.
+                None => by_shape.values().copied().max().max(*wild),
+            };
             if let Some(last) = last {
                 cands.push(Cand {
                     table,
@@ -490,30 +504,29 @@ impl ModuleTranslation<'_> {
     }
 }
 
-/// Whether two module function types may share an engine type: same
-/// param and result counts and the same value types, with any two reference
-/// types counted alike (their concrete indices are module-interned and may
-/// differ for one engine type). A `false` is exact; a `true` may be wrong
-/// and must be settled by an engine-type compare.
-fn ix_func_shape_may_equal(
-    types: &crate::ModuleTypesBuilder,
-    a: ModuleInternedTypeIndex,
-    b: ModuleInternedTypeIndex,
-) -> bool {
-    if a == b {
-        return true;
-    }
-    let (Some(fa), Some(fb)) = (types[a].as_func(), types[b].as_func()) else {
-        return true;
+/// The shape of a module function type: param count, then each param and
+/// result value type, with every reference type collapsed to one marker
+/// (their concrete indices are module-interned and may differ for one engine
+/// type). Two function types with different keys never share an engine
+/// type; equal keys may or may not, which the runtime fill settles by engine
+/// type. `None` for a type that is not a plain (unshared) function type, which
+/// is treated as possibly equal to anything.
+fn ix_func_shape_key(types: &crate::ModuleTypesBuilder, t: ModuleInternedTypeIndex) -> Option<Vec<u8>> {
+    let f = types[t].as_func()?;
+    let code = |v: &crate::WasmValType| match v {
+        crate::WasmValType::I32 => 0u8,
+        crate::WasmValType::I64 => 1,
+        crate::WasmValType::F32 => 2,
+        crate::WasmValType::F64 => 3,
+        crate::WasmValType::V128 => 4,
+        crate::WasmValType::Ref(_) => 5,
     };
-    let same = |x: &[crate::WasmValType], y: &[crate::WasmValType]| {
-        x.len() == y.len()
-            && x.iter().zip(y).all(|(p, q)| match (p, q) {
-                (crate::WasmValType::Ref(_), crate::WasmValType::Ref(_)) => true,
-                _ => p == q,
-            })
-    };
-    same(fa.params(), fb.params()) && same(fa.results(), fb.results())
+    let mut k = Vec::with_capacity(9 + f.params().len() + f.results().len());
+    k.extend_from_slice(&(f.params().len() as u64).to_le_bytes());
+    k.extend(f.params().iter().map(code));
+    k.push(0xff);
+    k.extend(f.results().iter().map(code));
+    Some(k)
 }
 
 #[cfg(test)]

@@ -400,6 +400,63 @@ fn ix_indirect_many_types_compile_fast() {
     assert_eq!(live.call(&mut store, 0).unwrap(), (0..LIVE as i32).sum::<i32>());
 }
 
+/// Many element types times many call types over one table plan in
+/// near-linear time: a row's length is one shape-key lookup per call type,
+/// not a scan of the element types (50k x 50k would be 2.5e9 compares).
+#[test]
+fn ix_indirect_many_element_and_call_types_compile_fast() {
+    const TYPES: usize = 50_000;
+    let valtypes = ["i32", "i64", "f32", "f64"];
+    let mut wat = String::with_capacity(TYPES * 160);
+    wat.push_str("(module\n");
+    for k in 0..TYPES {
+        // Nine params, the base-4 digits of `k`: all distinct shapes.
+        wat.push_str("(type (func (param");
+        let mut n = k;
+        for _ in 0..9 {
+            wat.push(' ');
+            wat.push_str(valtypes[n % 4]);
+            n /= 4;
+        }
+        wat.push_str(") (result i32)))\n");
+    }
+    for k in 0..TYPES {
+        wat.push_str(&format!("(func $f{k} (type {k}) (i32.const {k}))\n"));
+    }
+    wat.push_str(&format!("(table {TYPES} funcref)\n(elem (i32.const 0)"));
+    for k in 0..TYPES {
+        wat.push_str(&format!(" $f{k}"));
+    }
+    wat.push_str(")\n(func (export \"dead\")\n unreachable\n");
+    for k in 0..TYPES {
+        wat.push_str(&format!(" call_indirect (type {k}) drop\n"));
+    }
+    // Type 0 is nine i32 params.
+    wat.push_str(
+        ")\n(func (export \"call0\") (param $i i32) (result i32)\n (call_indirect (type 0)",
+    );
+    for _ in 0..9 {
+        wat.push_str(" (i32.const 0)");
+    }
+    wat.push_str(" (local.get $i)))\n)\n");
+    let wasm = wat::parse_str(&wat).unwrap();
+    let mut c = config(true, true);
+    c.parallel_compilation(true);
+    let engine = Engine::new(&c).unwrap();
+    let t = std::time::Instant::now();
+    let module = Module::new(&engine, &wasm).unwrap();
+    let took = t.elapsed();
+    assert!(took.as_secs() < 60, "compile took {took:?}");
+    let mut store = Store::new(&engine, ());
+    let instance = Instance::new(&mut store, &module, &[]).unwrap();
+    let call0 = instance
+        .get_typed_func::<i32, i32>(&mut store, "call0")
+        .unwrap();
+    assert_eq!(call0.call(&mut store, 0).unwrap(), 0);
+    let e = call0.call(&mut store, 1).unwrap_err();
+    assert_eq!(trap_of(e), Trap::BadSignature);
+}
+
 /// An element segment that traps at instantiation, after an earlier one
 /// wrote one of this instance's functions into an imported table: the
 /// instance fails, but that function stays callable, and must see the
