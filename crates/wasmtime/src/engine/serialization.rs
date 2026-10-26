@@ -216,6 +216,10 @@ pub struct Metadata<'a> {
     ix_abi_hash: u64,
 }
 
+fn hex32(b: &[u8; 32]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
 impl Metadata<'_> {
     #[cfg(any(feature = "cranelift", feature = "winch"))]
     pub fn new(engine: &Engine) -> Result<Metadata<'static>> {
@@ -328,6 +332,23 @@ impl Metadata<'_> {
         );
     }
 
+    fn check_ix_aot_artifact(found: u8, expected: u8) -> Result<()> {
+        if found == expected {
+            return Ok(());
+        }
+        let name = |k: u8| match k {
+            wasmtime_environ::IX_AOT_PRODUCTION => "a production",
+            wasmtime_environ::IX_AOT_INSTRUMENTED => "a PGO-instrumented (training-only)",
+            wasmtime_environ::IX_AOT_PGO_FUZZ => "a random-profile (test-only)",
+            _ => "an unknown",
+        };
+        bail!(
+            "Module is {} ix-aot artifact but this engine loads {} one",
+            name(found),
+            name(expected)
+        );
+    }
+
     fn check_cost(
         consume_fuel: bool,
         found: &OperatorCostStrategy,
@@ -378,6 +399,8 @@ impl Metadata<'_> {
             ix_static_call_indirect,
             ix_wasm_cc,
             ix_aot_callable,
+            ix_aot_artifact,
+            ix_aot_fingerprint,
 
             // This doesn't affect compilation, it's just a runtime setting.
             memory_reservation_for_growth: _,
@@ -482,6 +505,14 @@ impl Metadata<'_> {
             other.ix_aot_callable,
             "ix-aot calling convention",
         )?;
+        Self::check_ix_aot_artifact(ix_aot_artifact, other.ix_aot_artifact)?;
+        if other.ix_aot_fingerprint != [0; 32] && ix_aot_fingerprint != other.ix_aot_fingerprint {
+            bail!(
+                "Module was compiled with ix-aot options {} but this engine expects {}",
+                hex32(&ix_aot_fingerprint),
+                hex32(&other.ix_aot_fingerprint)
+            );
+        }
         Self::check_bool(
             relaxed_simd_deterministic,
             other.relaxed_simd_deterministic,
@@ -743,6 +774,29 @@ mod test {
             }
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_ix_aot_artifact_and_fingerprint() -> Result<()> {
+        let engine = Engine::default();
+        // An instrumented artifact on an ordinary engine.
+        let mut m = Metadata::new(&engine)?;
+        m.tunables.ix_aot_artifact = wasmtime_environ::IX_AOT_INSTRUMENTED;
+        let e = m.check_compatible(&engine).unwrap_err();
+        assert_contains(&e, "PGO-instrumented");
+        // Any fingerprint passes an engine that expects none.
+        let mut m = Metadata::new(&engine)?;
+        m.tunables.ix_aot_fingerprint = [7; 32];
+        m.check_compatible(&engine)?;
+        // A fingerprint mismatch fails an engine that expects one.
+        let mut cfg = Config::new();
+        cfg.ix_aot_fingerprint([9; 32]);
+        let strict = Engine::new(&cfg)?;
+        let mut m = Metadata::new(&strict)?;
+        m.tunables.ix_aot_fingerprint = [7; 32];
+        let e = m.check_compatible(&strict).unwrap_err();
+        assert_contains(&e, "ix-aot options");
         Ok(())
     }
 
