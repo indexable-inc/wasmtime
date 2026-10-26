@@ -6,6 +6,13 @@ use serde_derive::{Deserialize, Serialize};
 use target_lexicon::{PointerWidth, Triple};
 use wasmparser::Operator;
 
+/// ix fork: [`Tunables::ix_aot_artifact`] of an ordinary artifact.
+pub const IX_AOT_PRODUCTION: u8 = 0;
+/// ix fork: [`Tunables::ix_aot_artifact`] of a `--pgo-instrument` artifact.
+pub const IX_AOT_INSTRUMENTED: u8 = 1;
+/// ix fork: [`Tunables::ix_aot_artifact`] of a `--pgo-fuzz` artifact.
+pub const IX_AOT_PGO_FUZZ: u8 = 2;
+
 macro_rules! define_tunables {
     (
         $(#[$outer_attr:meta])*
@@ -275,6 +282,22 @@ define_tunables! {
         /// the Cranelift trampolines call and are called with that
         /// convention. Part of the artifact check. See `Config::ix_aot`.
         pub ix_aot_callable: bool,
+
+        /// ix fork: what kind of ix-aot artifact this is, checked for exact
+        /// equality on deserialize. 0 ([`IX_AOT_PRODUCTION`]): an ordinary
+        /// artifact. 1 ([`IX_AOT_INSTRUMENTED`]): `--pgo-instrument`, whose
+        /// code stores PGO counters to a fixed address outside the sandbox,
+        /// so only a training host that maps the counters may load it. 2
+        /// ([`IX_AOT_PGO_FUZZ`]): compiled with a random profile, for tests.
+        /// See `Config::ix_aot_artifact`.
+        pub ix_aot_artifact: u8,
+
+        /// ix fork: the ix-aot options fingerprint (sha256 of every option
+        /// that changes the output, the profile's hash and the LLVM version
+        /// included). All zero means "not ix-aot" in an artifact and "accept
+        /// any" in an engine; a non-zero engine value must equal the
+        /// artifact's. See `Config::ix_aot_fingerprint`.
+        pub ix_aot_fingerprint: [u8; 32],
     }
 
     pub struct ConfigTunables {
@@ -373,6 +396,8 @@ impl Tunables {
             ix_static_call_indirect: false,
             ix_wasm_cc: IxWasmCc::Standard,
             ix_aot_callable: false,
+            ix_aot_artifact: IX_AOT_PRODUCTION,
+            ix_aot_fingerprint: [0; 32],
         }
     }
 

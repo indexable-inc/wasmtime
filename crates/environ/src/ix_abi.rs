@@ -105,7 +105,8 @@ pub const IX_FEATURES: &[(&str, u32)] = &[
     ("intrinsics", crate::IX_INTRINSICS_ABI),
     // `ix_aot_callable`: wasm functions use the C calling convention and a
     // trailing results pointer (16-byte slots) for more than one result.
-    ("ix-aot", 1),
+    // 2: `ix_aot_artifact` and `ix_aot_fingerprint` in the metadata.
+    ("ix-aot", 2),
     // `poll_interruption`: the vmctx `poll_ptr` word, tested at every
     // function entry and loop header. 2: `IxPollPlan` skips the entry poll
     // of bounded functions and adds polls before long returns and runs; the

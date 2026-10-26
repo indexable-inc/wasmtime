@@ -9,6 +9,7 @@ use core::str::FromStr;
 use std::path::Path;
 pub use wasmparser::WasmFeatures;
 pub use wasmtime_environ::IxWasmCc;
+pub use wasmtime_environ::{IX_AOT_INSTRUMENTED, IX_AOT_PGO_FUZZ, IX_AOT_PRODUCTION};
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use wasmtime_environ::FlagValue;
 use wasmtime_environ::{ConfigTunables, OperatorCost, OperatorCostStrategy, TripleExt, Tunables};
@@ -1113,6 +1114,25 @@ impl Config {
     /// [`IxWasmCc::Standard`] and the target is x86_64 or aarch64.
     pub fn ix_aot(&mut self, enable: bool) -> &mut Self {
         self.tunables.ix_aot_callable = Some(enable);
+        self
+    }
+
+    /// ix fork: the kind of ix-aot artifact this engine compiles or accepts
+    /// (`wasmtime_environ::IX_AOT_PRODUCTION`, `IX_AOT_INSTRUMENTED`,
+    /// `IX_AOT_PGO_FUZZ`). Deserializing needs an exact match, so an
+    /// ordinary engine refuses a PGO-instrumented artifact (its code stores
+    /// counters to a fixed address that only a training host maps) and a
+    /// training engine refuses a production one.
+    pub fn ix_aot_artifact(&mut self, kind: u8) -> &mut Self {
+        self.tunables.ix_aot_artifact = Some(kind);
+        self
+    }
+
+    /// ix fork: the ix-aot options fingerprint this engine compiles with, or
+    /// expects of every artifact it deserializes (all zero: any). A
+    /// non-zero value must equal the artifact's.
+    pub fn ix_aot_fingerprint(&mut self, fingerprint: [u8; 32]) -> &mut Self {
+        self.tunables.ix_aot_fingerprint = Some(fingerprint);
         self
     }
 
