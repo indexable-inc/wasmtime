@@ -1022,6 +1022,23 @@ impl CallThreadState {
             return TrapTest::NotWasm;
         };
 
+        // A memory fault at a `StackOverflow` site is a stack probe (ix-aot
+        // `probe-stack`="inline-asm"): it may only touch the native stack
+        // below this store's wasm stack limit, i.e. the guard page under a
+        // frame being allocated. Anything else is not a stack overflow and
+        // is left to crash like any unknown fault. (Explicit stack-limit
+        // checks trap without a fault address and are not affected.)
+        if let (wasmtime_environ::CompiledTrap::Normal(wasmtime_environ::Trap::StackOverflow), Some(addr)) =
+            (&trap, faulting_addr)
+        {
+            // SAFETY: the store context outlives the wasm call this signal
+            // interrupted; `stack_limit` is a plain word.
+            let limit = unsafe { *self.vm_store_context.get().as_ref().stack_limit.get() };
+            if addr >= limit {
+                return TrapTest::NotWasm;
+            }
+        }
+
         // If all that passed then this is indeed a wasm trap, so return the
         // `Handler` setup in the original wasm frame.
         self.set_jit_trap(regs, faulting_addr, trap);

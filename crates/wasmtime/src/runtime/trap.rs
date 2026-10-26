@@ -154,6 +154,12 @@ pub(crate) fn from_runtime_box(
                 if faulting_addr.is_some() || !pending {
                     err = poll_trap_mismatch(pc, faulting_addr, pending);
                 }
+            } else if matches!(trap, CompiledTrap::Normal(Trap::StackOverflow)) {
+                // A stack probe that hit the native stack's guard: the signal
+                // handler already checked the address is below the wasm stack
+                // limit (`test_if_trap`). It is not a linear-memory address,
+                // so `wasm_fault` (which aborts on unknown addresses) must
+                // not see it.
             } else if let Some(fault) = faulting_addr.and_then(|addr| store.wasm_fault(pc, addr)) {
                 err = err.context(fault);
             }
