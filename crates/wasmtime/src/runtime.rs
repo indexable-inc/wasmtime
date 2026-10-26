@@ -51,10 +51,10 @@ pub(crate) mod limits;
 pub(crate) mod linker;
 pub(crate) mod memory;
 pub(crate) mod module;
-#[cfg(all(unix, feature = "std"))]
-pub(crate) mod poll_interrupt;
 #[cfg(feature = "debug-builtins")]
 pub(crate) mod native_debug;
+#[cfg(all(unix, feature = "std"))]
+pub(crate) mod poll_interrupt;
 pub(crate) mod resources;
 pub(crate) mod store;
 pub(crate) mod trampoline;

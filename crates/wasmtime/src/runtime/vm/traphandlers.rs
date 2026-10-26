@@ -109,7 +109,10 @@ pub(super) unsafe fn raise_preexisting_trap(store: &mut dyn VMStore) {
 /// As `raise_preexisting_trap`: wasm is on the stack, entered through a
 /// libcall trampoline that recorded the exit FP and PC, nothing is recorded
 /// in `unwind` yet, and no Rust destructors are live up to the trampoline.
-pub(super) unsafe fn raise_trap_from_libcall(store: &mut dyn VMStore, trap: wasmtime_environ::Trap) {
+pub(super) unsafe fn raise_trap_from_libcall(
+    store: &mut dyn VMStore,
+    trap: wasmtime_environ::Trap,
+) {
     tls::with(|info| {
         let info = info.unwrap();
         info.record_unwind(UnwindReason::from(Error::from(trap)));
@@ -1028,8 +1031,10 @@ impl CallThreadState {
         // frame being allocated. Anything else is not a stack overflow and
         // is left to crash like any unknown fault. (Explicit stack-limit
         // checks trap without a fault address and are not affected.)
-        if let (wasmtime_environ::CompiledTrap::Normal(wasmtime_environ::Trap::StackOverflow), Some(addr)) =
-            (&trap, faulting_addr)
+        if let (
+            wasmtime_environ::CompiledTrap::Normal(wasmtime_environ::Trap::StackOverflow),
+            Some(addr),
+        ) = (&trap, faulting_addr)
         {
             // SAFETY: the store context outlives the wasm call this signal
             // interrupted; `stack_limit` is a plain word.

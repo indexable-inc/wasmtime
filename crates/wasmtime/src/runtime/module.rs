@@ -835,7 +835,11 @@ impl Module {
     /// The `ix` intrinsics (indexable fork) this module imports. They are
     /// lowered inline by the compiler and are not in [`Module::imports`].
     pub fn ix_intrinsics(&self) -> impl ExactSizeIterator<Item = crate::IxIntrinsic> + '_ {
-        self.compiled_module().module().ix_intrinsics.iter().map(|(_, i)| *i)
+        self.compiled_module()
+            .module()
+            .ix_intrinsics
+            .iter()
+            .map(|(_, i)| *i)
     }
 
     /// Returns the list of exports that this [`Module`] has and will be
@@ -1449,7 +1453,9 @@ fn ix_build_dispatch(
                 .get(usize::try_from(row.image)?)
                 .context("ix dispatch row image out of range")?;
             let len = usize::try_from(row.len)?;
-            let image = image.get(..len).context("ix dispatch row longer than its image")?;
+            let image = image
+                .get(..len)
+                .context("ix dispatch row longer than its image")?;
             let start = usize::try_from(row.start)?;
             let dst = len
                 .checked_add(1)
