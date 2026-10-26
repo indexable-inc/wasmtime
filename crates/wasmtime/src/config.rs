@@ -8,9 +8,9 @@ use core::str::FromStr;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use std::path::Path;
 pub use wasmparser::WasmFeatures;
-pub use wasmtime_environ::IxWasmCc;
 #[cfg(any(feature = "cranelift", feature = "winch"))]
 use wasmtime_environ::FlagValue;
+pub use wasmtime_environ::IxWasmCc;
 use wasmtime_environ::{ConfigTunables, OperatorCost, OperatorCostStrategy, TripleExt, Tunables};
 
 #[cfg(feature = "runtime")]
@@ -275,9 +275,7 @@ struct CompilerConfig {
 /// ix fork: builds the compiler used in place of Cranelift's own builder
 /// (see [`Config::ix_compiler`]). It is given the target triple (`None` for
 /// the host).
-pub type IxCompilerFn = dyn Fn(
-        Option<target_lexicon::Triple>,
-    ) -> Result<Box<dyn wasmtime_environ::CompilerBuilder>>
+pub type IxCompilerFn = dyn Fn(Option<target_lexicon::Triple>) -> Result<Box<dyn wasmtime_environ::CompilerBuilder>>
     + Send
     + Sync;
 
@@ -1110,7 +1108,8 @@ impl Config {
     /// # Errors
     ///
     /// Building the engine fails unless [`Config::ix_wasm_cc`] is
-    /// [`IxWasmCc::Standard`] and the target is x86_64 or aarch64.
+    /// [`IxWasmCc::Standard`], the target is x86_64 or aarch64, and the host
+    /// is Linux.
     pub fn ix_aot(&mut self, enable: bool) -> &mut Self {
         self.tunables.ix_aot_callable = Some(enable);
         self
@@ -3011,6 +3010,14 @@ impl Config {
         if self.tunables.ix_wasm_cc == Some(IxWasmCc::WideTrade) {
             bail!("ix_wasm_cc: WideTrade is not supported");
         }
+        // ix fork: ix-aot code relies on stack probes trapping cleanly, and
+        // only the Linux signal path (`test_if_trap`) checks that a fault at
+        // a StackOverflow site is below the wasm stack limit; the macOS mach
+        // port path (`machports.rs`) does not. So ix-aot engines are
+        // Linux-only.
+        if self.tunables.ix_aot_callable == Some(true) && !cfg!(target_os = "linux") {
+            bail!("ix_aot is only supported on Linux");
+        }
         if let Some(slack) = self.tunables.ix_leaf_stack_slack {
             let slack = usize::try_from(slack)?;
             if slack > 64 * 1024 {
@@ -3246,10 +3253,11 @@ impl Config {
             // Only the backends whose poll codegen and trap attribution are
             // tested (fork poll tests, wast with polls on, disas goldens).
             match self.compiler_target().architecture {
-                target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_) => {}
-                other => bail!(
-                    "poll interruption is only supported on x86_64 and aarch64, not {other}"
-                ),
+                target_lexicon::Architecture::X86_64 | target_lexicon::Architecture::Aarch64(_) => {
+                }
+                other => {
+                    bail!("poll interruption is only supported on x86_64 and aarch64, not {other}")
+                }
             }
         }
 
@@ -3403,7 +3411,10 @@ impl Config {
         // Always set, so a raw `cranelift_flag_set` cannot disagree with the
         // tunables that the artifact check compares.
         if tunables.ix_wasm_cc != IxWasmCc::Standard {
-            if !matches!(self.compiler_config_mut().strategy, Some(Strategy::Cranelift)) {
+            if !matches!(
+                self.compiler_config_mut().strategy,
+                Some(Strategy::Cranelift)
+            ) {
                 bail!("ix_wasm_cc requires the Cranelift compiler");
             }
             if !matches!(
@@ -3413,10 +3424,16 @@ impl Config {
                 bail!("ix_wasm_cc is only supported on x86_64 and aarch64");
             }
         }
-        if matches!(self.compiler_config_mut().strategy, Some(Strategy::Cranelift)) {
+        if matches!(
+            self.compiler_config_mut().strategy,
+            Some(Strategy::Cranelift)
+        ) {
             self.compiler_config_mut().settings.insert(
                 "tail_arg_regs".into(),
-                (tunables.ix_wasm_cc.cranelift_flag().into(), UserSpecified::No),
+                (
+                    tunables.ix_wasm_cc.cranelift_flag().into(),
+                    UserSpecified::No,
+                ),
             );
         }
 

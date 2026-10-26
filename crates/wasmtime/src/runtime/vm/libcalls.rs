@@ -470,7 +470,11 @@ unsafe fn memory_copy_chunked(store: &mut dyn VMStore, dst: *mut u8, src: *mut u
     let backward = d != 0 && d < len;
     // Likewise `src - dst` in `0..len`: src is inside the destination range.
     let overlap = backward || (src as usize).wrapping_sub(dst as usize) < len;
-    let chunk = if overlap { BULK_CHUNK } else { BULK_COPY_FAR_CHUNK };
+    let chunk = if overlap {
+        BULK_CHUNK
+    } else {
+        BULK_COPY_FAR_CHUNK
+    };
     let mut done = 0;
     while done < len {
         if done != 0 {

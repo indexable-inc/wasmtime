@@ -464,7 +464,10 @@ pub struct StoreOpaque {
     vm_store_context: VMStoreContext,
 
     /// The poll cell compiled code reads under poll interruption (ix fork);
-    /// `None` when `Config::poll_interruption` is off.
+    /// `None` when `Config::poll_interruption` is off. Set once in
+    /// `Store::new` and never reassigned: every instance's vmctx `poll_ptr`
+    /// points into it for the instance's whole life, and ix-aot code loads
+    /// that pointer as invariant.
     #[cfg(all(unix, feature = "std"))]
     poll_cell: Option<crate::InterruptHandle>,
 

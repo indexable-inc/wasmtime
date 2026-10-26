@@ -550,7 +550,14 @@ impl Instance {
 
     /// Return a pointer to the vmctx field holding the store's poll word
     /// (ix fork, poll interruption).
-    pub fn poll_ptr(self: Pin<&mut Self>) -> &mut Option<VmPtr<AtomicU64>> {
+    ///
+    /// Invariant relied on by compiled code: this field is written only by
+    /// `set_store`, which runs once per instantiation (`initialize_vmctx`)
+    /// before any wasm of the instance runs, and never while the instance
+    /// is live. ix-aot loads it with `!invariant.load` (once per function).
+    /// So this accessor stays private to `set_store`; anything that must
+    /// rewrite the field on a live instance has to drop that marking first.
+    fn poll_ptr(self: Pin<&mut Self>) -> &mut Option<VmPtr<AtomicU64>> {
         let offset = self.offsets().ptr.vmctx().poll_ptr();
         unsafe { self.vmctx_plus_offset_mut(offset) }
     }
@@ -574,7 +581,10 @@ impl Instance {
                     Some(NonNull::from(store.engine().epoch_counter()).into());
             }
             // Rewritten on every instantiation, so a pooling slot reused by
-            // another store polls that store's word, never the old one.
+            // another store polls that store's word, never the old one. The
+            // only write of the field (see `poll_ptr`); the store's cell is
+            // created in `Store::new` and never replaced, so the value stays
+            // valid and fixed for the instance's whole life.
             *self.as_mut().poll_ptr() = store.poll_ptr().map(Into::into);
 
             if self.env_module().needs_gc_heap {
