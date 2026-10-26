@@ -14,12 +14,15 @@ crate::ix_abi_struct! {
     /// pointers per module, shared by every instance: for row `r` over table
     /// image `images[r.image]` and type `r.ty`, entry `r.start + i` for
     /// `i < r.len` is the wasm-ABI entry of element `i`'s function when its
-    /// type is `r.ty`, else 0, and entry `r.start + r.len` is 0. Compiled code
+    /// engine type is `r.ty`'s, else 0, and entry `r.start + r.len` is 0.
+    /// `r.len` reaches past every element whose type may be `r.ty`'s engine
+    /// type (`ix_compute_dispatch`), so past it no element matches. Cranelift
     /// clamps the index to `r.len` (Spectre-safe select), loads the entry and
-    /// calls it with its own vmctx when non-zero. A zero entry (another type,
-    /// null, out of bounds, or past the row's last match) runs the ordinary
-    /// fully checked lowering, which then calls or traps exactly as stock
-    /// Wasmtime does.
+    /// calls it with its own vmctx when non-zero; a zero entry (another type,
+    /// null, out of bounds, or past the row) runs the ordinary fully checked
+    /// lowering, which then calls or traps exactly as stock Wasmtime does.
+    /// ix-aot (`Tunables::ix_aot`) traps on a zero entry directly, with the
+    /// checked lowering's trap code, which relies on that bound on `r.len`.
     #[derive(Clone, Debug, Default, serde_derive::Serialize, serde_derive::Deserialize)]
     pub struct IxDispatchPlan {
         /// The fixed contents of each static table that has a row, cut after

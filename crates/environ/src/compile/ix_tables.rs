@@ -298,9 +298,15 @@ impl ModuleTranslation<'_> {
     ///   vmctx is the callee's (all elements are this instance's
     ///   functions);
     /// * the type is final, so a callee matches it exactly when its
-    ///   engine-canonical type index equals the type's (no subtypes);
-    /// * at least one element has that type. The row stops after the last
-    ///   such element; calls past it take the checked path.
+    ///   engine-canonical type index equals the type's (no subtypes; the
+    ///   runtime compares engine indices, not module-interned ones);
+    /// * at least one element may have that type. The row stops after the
+    ///   last element whose function type has the same shape (same value
+    ///   types, any two reference types counted alike), so it covers every
+    ///   element of the same engine type even when the module declares the
+    ///   type twice (two interned indices, one engine type). Calls past the
+    ///   row's end take the checked path; inside it the runtime fills by
+    ///   engine type, so a zero entry is a real mismatch.
     ///
     /// The whole array holds at most `ENTRIES_PER_ELEMENT` entries per
     /// non-null element of the tables with rows (plus `ENTRIES_FLOOR`), and
@@ -393,7 +399,19 @@ impl ModuleTranslation<'_> {
             let Some((_, Some(by_ty))) = &stats else {
                 continue;
             };
-            if let Some(&(_, last)) = by_ty.get(&ty) {
+            // The row must reach every element whose engine type may equal
+            // `ty`, not only those with the same interned index: without type
+            // canonicalization (no GC types) two identical `(type (func ..))`
+            // declarations intern to different indices but one engine type,
+            // and the runtime fills (and the compiler treats a zero entry as
+            // a mismatch) by engine type. Shapes that differ can never be
+            // equal; the rest are included and the runtime fill decides.
+            let last = by_ty
+                .iter()
+                .filter(|(fty, _)| ix_func_shape_may_equal(types, **fty, ty))
+                .map(|(_, &(_, last))| last)
+                .max();
+            if let Some(last) = last {
                 cands.push(Cand {
                     table,
                     ty,
@@ -470,6 +488,32 @@ impl ModuleTranslation<'_> {
         );
         self.module.ix_dispatch = plan;
     }
+}
+
+/// Whether two module function types may share an engine type: same
+/// param and result counts and the same value types, with any two reference
+/// types counted alike (their concrete indices are module-interned and may
+/// differ for one engine type). A `false` is exact; a `true` may be wrong
+/// and must be settled by an engine-type compare.
+fn ix_func_shape_may_equal(
+    types: &crate::ModuleTypesBuilder,
+    a: ModuleInternedTypeIndex,
+    b: ModuleInternedTypeIndex,
+) -> bool {
+    if a == b {
+        return true;
+    }
+    let (Some(fa), Some(fb)) = (types[a].as_func(), types[b].as_func()) else {
+        return true;
+    };
+    let same = |x: &[crate::WasmValType], y: &[crate::WasmValType]| {
+        x.len() == y.len()
+            && x.iter().zip(y).all(|(p, q)| match (p, q) {
+                (crate::WasmValType::Ref(_), crate::WasmValType::Ref(_)) => true,
+                _ => p == q,
+            })
+    };
+    same(fa.params(), fb.params()) && same(fa.results(), fb.results())
 }
 
 #[cfg(test)]
