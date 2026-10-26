@@ -307,9 +307,14 @@ impl ModuleTranslation<'_> {
     /// never more than `MAX_ENTRIES`, so its memory is a small multiple of
     /// the module's own element segments. Rows are kept in order of static
     /// call sites per entry (the most calls for the memory first); the rest
-    /// keep the ordinary lowering. Turso's guest (2450 elements, 33 rows,
-    /// 50322 truncated entries) keeps the rows of about 98% of its sites at
-    /// 8 per element.
+    /// keep the ordinary lowering. Static site counts say nothing about how
+    /// hot a call is: at 8 per element Turso's guest (2450 elements, 33
+    /// rows, 50322 truncated entries) kept the rows of about 98% of its
+    /// sites but dropped the long row of its VDBE op handlers, its hottest
+    /// `call_indirect`. At 32 per element (at most 256 bytes of array per
+    /// element, once per module) that row fits, which took about 150
+    /// instructions off each Turso lookup and 245 off each insert on Zen 5
+    /// (wasm-host `bench/results/2026-10-26-ix-aot-beat-w2c`).
     ///
     /// The runtime fills each row once per module (see `IxDispatchPlan`);
     /// the compiler lowers calls through a row with no bounds, null or
@@ -317,7 +322,7 @@ impl ModuleTranslation<'_> {
     /// the call sites (plus log factors).
     pub(crate) fn ix_compute_dispatch(&mut self, types: &crate::ModuleTypesBuilder) {
         const MAX_ENTRIES: u64 = 1 << 20;
-        const ENTRIES_PER_ELEMENT: u64 = 8;
+        const ENTRIES_PER_ELEMENT: u64 = 32;
         const ENTRIES_FLOOR: u64 = 1 << 10;
         let module = &self.module;
 

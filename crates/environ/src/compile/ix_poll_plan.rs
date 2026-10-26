@@ -114,8 +114,15 @@ use wasmparser::{FunctionBody, Operator};
 /// Max `B` of an exempt function reachable from outside the module or by
 /// `return_call`, and what an unknown callee is charged.
 pub const IX_POLL_ESCAPING_LIMIT: u64 = 128;
-/// Max `B` of other exempt functions.
-pub const IX_POLL_INTERNAL_LIMIT: u64 = 1024;
+/// Max `B` of other exempt functions. As large as the segment limit allows
+/// (`1 + B <= SEGMENT_LIMIT`, asserted below): an exempt callee's whole run
+/// is charged to its caller, whose own segment and return limits still
+/// hold, so the bound between polls (`SEGMENT_LIMIT + RETURN_LIMIT x
+/// (D - 1)`) does not depend on this value; a larger one only moves polls
+/// from callee entries to callers. 4095 instead of 1024 took 244
+/// instructions and 166 cycles off each Turso insert on Zen 5
+/// (wasm-host `bench/results/2026-10-26-ix-aot-beat-w2c`).
+pub const IX_POLL_INTERNAL_LIMIT: u64 = IX_POLL_SEGMENT_LIMIT - 1;
 /// Max local cost at a return of a function that polls at entry.
 pub const IX_POLL_RETURN_LIMIT: u64 = 4096;
 /// Max local cost anywhere in a function that polls at entry.

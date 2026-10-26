@@ -284,7 +284,7 @@ fn ix_indirect_rows_truncated() {
 
 /// A tiny module can't make a big dispatch array: a 2^20-slot table whose
 /// only elements sit at its end gets no rows (they would be 2^20 entries
-/// each), and the array stays within its bound of 8 entries per element
+/// each), and the array stays within its bound of 32 entries per element
 /// plus 1024.
 #[test]
 fn ix_indirect_sparse_table_bounded() {
@@ -314,7 +314,7 @@ fn ix_indirect_sparse_table_bounded() {
     for (c, _) in configs() {
         let engine = Engine::new(&c).unwrap();
         let module = Module::new(&engine, &wasm).unwrap();
-        assert!(module.ix_dispatch_entries() <= 8 * N + 1024);
+        assert!(module.ix_dispatch_entries() <= 32 * N + 1024);
         assert_eq!(module.ix_dispatch_rows(), 0);
         let mut store = Store::new(&engine, ());
         let instance = Instance::new(&mut store, &module, &[]).unwrap();
@@ -334,7 +334,7 @@ fn ix_indirect_sparse_table_bounded() {
 #[test]
 fn ix_indirect_many_types_compile_fast() {
     const TYPES: usize = 200_000;
-    // Row `k` is `k + 2` entries: 32 rows fit the cap (8 per element + 1024).
+    // Row `k` is `k + 2` entries: 32 rows fit the cap (32 per element + 1024).
     const LIVE: usize = 32;
     let valtypes = ["i32", "i64", "f32", "f64"];
     let mut wat = String::with_capacity(TYPES * 64);
