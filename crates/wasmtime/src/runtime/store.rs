@@ -973,6 +973,16 @@ impl<T> Store<T> {
         self.inner.call_hook = Some(CallHookInner::Sync(Box::new(hook)));
     }
 
+    /// The address ranges of every stack-switching continuation stack this
+    /// store allocated, in allocation order. With
+    /// [`Config::with_continuation_stacks`](crate::Config::with_continuation_stacks)
+    /// they all lie in memory the embedder owns, which is how a snapshot
+    /// manager finds the bytes it must save.
+    #[cfg(feature = "stack-switching")]
+    pub fn continuation_stack_ranges(&self) -> Vec<core::ops::Range<usize>> {
+        self.inner.continuation_stack_ranges()
+    }
+
     /// Returns the [`Engine`] that this store is associated with.
     pub fn engine(&self) -> &Engine {
         self.inner.engine()
@@ -2160,6 +2170,13 @@ at https://bytecodealliance.org/security.
         }
     }
 
+    /// The address ranges of every continuation stack this store allocated, in
+    /// allocation order (for an embedder that snapshots them).
+    #[cfg(feature = "stack-switching")]
+    pub fn continuation_stack_ranges(&self) -> Vec<core::ops::Range<usize>> {
+        self.continuations.iter().filter_map(|c| c.stack.range()).collect()
+    }
+
     /// Allocates a new continuation. Note that we currently don't support
     /// deallocating them. Instead, all continuations remain allocated
     /// throughout the store's lifetime.
@@ -2168,7 +2185,21 @@ at https://bytecodealliance.org/security.
         // FIXME(frank-emrich) Do we need to pin this?
         let mut continuation = Box::new(VMContRef::empty());
         let stack_size = self.engine.config().async_stack_size;
-        let stack = crate::vm::VMContinuationStack::new(stack_size)?;
+        let stack = match &self.engine.config().continuation_stack_creator {
+            Some(creator) => {
+                let span = creator.new_stack(stack_size)?;
+                if span.len < stack_size {
+                    crate::bail!(
+                        "continuation stack creator returned {} bytes, {stack_size} were requested",
+                        span.len
+                    );
+                }
+                // SAFETY: `ContinuationStackCreator`'s contract: the span is
+                // valid, exclusive and outlives this store.
+                unsafe { crate::vm::VMContinuationStack::from_raw_parts(span.base, span.guard_size, span.len)? }
+            }
+            None => crate::vm::VMContinuationStack::new(stack_size)?,
+        };
         #[cfg(asan)]
         {
             let asan_range = stack

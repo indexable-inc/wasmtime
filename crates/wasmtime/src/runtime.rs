@@ -123,6 +123,10 @@ pub use profiling::{GuestProfiler, GuestProfilerModules};
 
 #[cfg(feature = "async")]
 pub(crate) mod stack;
+#[cfg(feature = "stack-switching")]
+mod continuation_stack;
+#[cfg(feature = "stack-switching")]
+pub use continuation_stack::*;
 #[cfg(feature = "async")]
 pub use stack::*;
 

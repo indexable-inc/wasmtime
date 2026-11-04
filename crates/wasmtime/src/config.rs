@@ -189,6 +189,8 @@ pub struct Config {
     pub(crate) async_stack_zeroing: bool,
     #[cfg(feature = "async")]
     pub(crate) stack_creator: Option<Arc<dyn RuntimeFiberStackCreator>>,
+    #[cfg(feature = "stack-switching")]
+    pub(crate) continuation_stack_creator: Option<Arc<dyn crate::ContinuationStackCreator>>,
     pub(crate) module_version: ModuleVersionStrategy,
     pub(crate) parallel_compilation: bool,
     pub(crate) memory_guaranteed_dense_image_size: u64,
@@ -302,6 +304,8 @@ impl Config {
             async_stack_zeroing: false,
             #[cfg(feature = "async")]
             stack_creator: None,
+            #[cfg(feature = "stack-switching")]
+            continuation_stack_creator: None,
             module_version: ModuleVersionStrategy::default(),
             parallel_compilation: !cfg!(miri),
             memory_guaranteed_dense_image_size: 16 << 20,
@@ -1769,6 +1773,16 @@ impl Config {
     #[cfg(feature = "async")]
     pub fn with_host_stack(&mut self, stack_creator: Arc<dyn StackCreator>) -> &mut Self {
         self.stack_creator = Some(Arc::new(StackCreatorProxy(stack_creator)));
+        self
+    }
+
+    /// Allocate stack-switching continuation stacks with `creator` instead of
+    /// one `mmap` per continuation, so the embedder owns (and can snapshot)
+    /// every continuation stack. Each stack requested has
+    /// [`Config::async_stack_size`] usable bytes.
+    #[cfg(feature = "stack-switching")]
+    pub fn with_continuation_stacks(&mut self, creator: Arc<dyn crate::ContinuationStackCreator>) -> &mut Self {
+        self.continuation_stack_creator = Some(creator);
         self
     }
 
